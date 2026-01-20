@@ -1,3 +1,8 @@
 zig-out/
 .zig-cache/
 .DS_Store
+
+
+.vscode/
+# Copilot Instructions
+.github/copilot-instructions.md
