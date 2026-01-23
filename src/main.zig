@@ -1,5 +1,5 @@
 const std = @import("std");
-const zig_files_hash = @import("zig_files_hash");
+// const zig_files_hash = @import("zig_files_hash");
 
 pub fn main() !void {
     // Prints to stderr, ignoring potential errors.
@@ -23,6 +23,10 @@ pub fn main() !void {
     const h2 = try fileHash(Blake3, path, null);
     const hex = std.fmt.bytesToHex(h2, .lower); // или .upper
     std.debug.print("Blake3 = {s}\n", .{hex[0..]});
+
+    const sha256 = try fileHash(Sha256, path, null);
+    const sha256_hex = std.fmt.bytesToHex(sha256, .lower);
+    std.debug.print("SHA-256 = {s}\n", .{sha256_hex[0..]});
 
     var arr = [_]u8{ 10, 20, 30, 40, 50 };
 
@@ -97,6 +101,11 @@ fn fileHash(comptime H: type, path: []const u8, options: ?HashOptions) !H.Digest
     var buf: [64 * 1024]u8 = undefined;
     const opt = options;
     var hasher = H.init(opt);
+
+    std.debug.print("Digest type = {any}\n", .{H.Digest});
+
+    std.debug.print("Digest size = {d}\n", .{@sizeOf(H.Digest)});
+
     while (true) {
         std.debug.print("prev buf len {any}\n", .{buf.len});
         const n = try file.read(buf[0..]);
@@ -108,6 +117,27 @@ fn fileHash(comptime H: type, path: []const u8, options: ?HashOptions) !H.Digest
         hasher.update(chunk);
     }
 }
+
+const Sha256 = struct {
+    inner: std.crypto.hash.sha2.Sha256,
+
+    pub fn init(options: ?HashOptions) Sha256 {
+        _ = options;
+        return .{ .inner = std.crypto.hash.sha2.Sha256.init(.{}) };
+    }
+
+    pub fn update(self: *Sha256, data: []const u8) void {
+        self.inner.update(data);
+    }
+
+    pub const Digest = [32]u8;
+
+    pub fn final(self: *Sha256) Digest {
+        var out: [32]u8 = undefined;
+        self.inner.final(out[0..]);
+        return out;
+    }
+};
 
 const Xxh3_64 = struct {
     inner: std.hash.XxHash3,
