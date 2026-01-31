@@ -24,6 +24,10 @@ pub fn main() !void {
     const hex = std.fmt.bytesToHex(h2, .lower); // или .upper
     std.debug.print("Blake3 = {s}\n", .{hex[0..]});
 
+    const sha224 = try fileHash(Sha224, path, null);
+    const sha224_hex = std.fmt.bytesToHex(sha224, .lower);
+    std.debug.print("SHA-224 = {s}\n", .{sha224_hex[0..]});
+
     const sha256 = try fileHash(Sha256, path, null);
     const sha256_hex = std.fmt.bytesToHex(sha256, .lower);
     std.debug.print("SHA-256 = {s}\n", .{sha256_hex[0..]});
@@ -89,7 +93,7 @@ fn xxh3_64_file(path: []const u8) !u64 {
 const HashMode = enum { hash, hmac, keyed };
 
 const HashOptions = struct {
-    mode: ?HashMode = .hash,
+    mode: HashMode = .hash,
     seed: ?u64 = null,
     key: ?[32]u8 = null,
     // key_encoding: ?KeyEncoding = null,
@@ -118,26 +122,38 @@ fn fileHash(comptime H: type, path: []const u8, options: ?HashOptions) !H.Digest
     }
 }
 
-const Sha256 = struct {
-    inner: std.crypto.hash.sha2.Sha256,
+fn Sha2_32(comptime Bits: u16) type {
+    return struct {
+        const Self = @This();
 
-    pub fn init(options: ?HashOptions) Sha256 {
-        _ = options;
-        return .{ .inner = std.crypto.hash.sha2.Sha256.init(.{}) };
-    }
+        const Inner = if (Bits == 256) std.crypto.hash.sha2.Sha256 else std.crypto.hash.sha2.Sha224;
 
-    pub fn update(self: *Sha256, data: []const u8) void {
-        self.inner.update(data);
-    }
+        inner: Inner,
 
-    pub const Digest = [32]u8;
+        pub fn init(options: ?HashOptions) Self {
+            _ = options;
+            return .{ .inner = Inner.init(.{}) };
+        }
 
-    pub fn final(self: *Sha256) Digest {
-        var out: [32]u8 = undefined;
-        self.inner.final(out[0..]);
-        return out;
-    }
-};
+        pub fn update(self: *Self, data: []const u8) void {
+            self.inner.update(data);
+        }
+
+        pub const digest_length = Bits / 8;
+
+        pub const Digest = [digest_length]u8;
+
+        pub fn final(self: *Self) Digest {
+            var out: [digest_length]u8 = undefined;
+            self.inner.final(&out);
+            return out;
+        }
+    };
+}
+
+const Sha224 = Sha2_32(224);
+
+const Sha256 = Sha2_32(256);
 
 const Xxh3_64 = struct {
     inner: std.hash.XxHash3,
