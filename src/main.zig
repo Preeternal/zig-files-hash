@@ -24,6 +24,10 @@ pub fn main() !void {
     const hex = std.fmt.bytesToHex(h2, .lower); // или .upper
     std.debug.print("Blake3 = {s}\n", .{hex[0..]});
 
+    const sha256T192 = try fileHash(Sha256T192, path, null);
+    const sha256T192_hex = std.fmt.bytesToHex(sha256T192, .lower);
+    std.debug.print("SHA-256/192 = {s}\n", .{sha256T192_hex[0..]});
+
     const sha224 = try fileHash(Sha224, path, null);
     const sha224_hex = std.fmt.bytesToHex(sha224, .lower);
     std.debug.print("SHA-224 = {s}\n", .{sha224_hex[0..]});
@@ -126,7 +130,12 @@ fn Sha2_32(comptime Bits: u16) type {
     return struct {
         const Self = @This();
 
-        const Inner = if (Bits == 256) std.crypto.hash.sha2.Sha256 else std.crypto.hash.sha2.Sha224;
+        const Inner = switch (Bits) {
+            192 => std.crypto.hash.sha2.Sha256T192,
+            224 => std.crypto.hash.sha2.Sha224,
+            256 => std.crypto.hash.sha2.Sha256,
+            else => @compileError("Bits must be 192/224/256"),
+        };
 
         inner: Inner,
 
@@ -150,6 +159,8 @@ fn Sha2_32(comptime Bits: u16) type {
         }
     };
 }
+
+const Sha256T192 = Sha2_32(192);
 
 const Sha224 = Sha2_32(224);
 
