@@ -17,12 +17,13 @@ pub fn main() !void {
         return;
     };
     std.debug.print("First argument: {s}\n", .{path});
-    const h = try fileHash(Xxh3_64, path, null);
-    std.debug.print("Xxh3_64 = {x}\n", .{h});
 
-    const h2 = try fileHash(Blake3, path, null);
-    const hex = std.fmt.bytesToHex(h2, .lower); // или .upper
-    std.debug.print("Blake3 = {s}\n", .{hex[0..]});
+    const xxh3_64 = try fileHash(Xxh3_64, path, null);
+    std.debug.print("Xxh3_64 = {x}\n", .{xxh3_64});
+
+    const blake3 = try fileHash(Blake3, path, null);
+    const blake3_hex = std.fmt.bytesToHex(blake3, .lower); // или .upper
+    std.debug.print("Blake3 = {s}\n", .{blake3_hex[0..]});
 
     const sha256T192 = try fileHash(Sha256T192, path, null);
     const sha256T192_hex = std.fmt.bytesToHex(sha256T192, .lower);
@@ -97,11 +98,11 @@ fn xxh3_64_file(path: []const u8) !u64 {
 const HashMode = enum { hash, hmac, keyed };
 
 const HashOptions = struct {
-    mode: HashMode = .hash,
+    // mode: HashMode = .hash,
     seed: ?u64 = null,
     // Blake3 key size 32 ([32]u8),
     // Sha2_32 key size varies depending on variant ([?]u8)
-    key: ?[]u8 = null,
+    key: ?[]const u8 = null,
     // key_encoding: ?KeyEncoding = null,
 };
 
@@ -188,14 +189,14 @@ const Xxh3_64 = struct {
 };
 
 const Blake3 = struct {
+    const Self = @This();
+
     inner: std.crypto.hash.Blake3,
 
-    pub fn init(options: ?HashOptions) !Blake3 {
+    pub fn init(options: ?HashOptions) !Self {
         var opt: std.crypto.hash.Blake3.Options = .{};
         if (options) |o| {
-            const is_keyed = o.mode == .keyed;
-            if (is_keyed) {
-                const k = o.key orelse return error.MissingKey;
+            if (o.key) |k| {
                 if (k.len != 32) {
                     return error.InvalidKeyLength;
                 }
@@ -205,23 +206,64 @@ const Blake3 = struct {
             } else {
                 opt.key = null; // not keyed
             }
+        } else {
+            opt.key = null; // not keyed
         }
 
         return .{ .inner = std.crypto.hash.Blake3.init(opt) };
     }
 
-    pub fn update(self: *Blake3, data: []const u8) void {
+    pub fn update(self: *Self, data: []const u8) void {
         self.inner.update(data);
     }
 
     pub const Digest = [32]u8;
 
-    pub fn final(self: *const Blake3) Digest {
+    pub fn final(self: *const Self) Digest {
         var out: [32]u8 = undefined;
         self.inner.final(out[0..]);
         return out;
     }
 };
+
+// const Blake3 = Blake3Func(.hash);
+// const Blake3Keyed = Blake3Func(.keyed);
+
+// const Blake3 = struct {
+//     inner: std.crypto.hash.Blake3,
+
+//     pub fn init(options: ?HashOptions) !Blake3 {
+//         var opt: std.crypto.hash.Blake3.Options = .{};
+//         if (options) |o| {
+//             const is_keyed = o.mode == .keyed;
+//             if (is_keyed) {
+//                 const k = o.key orelse return error.MissingKey;
+//                 if (k.len != 32) {
+//                     return error.InvalidKeyLength;
+//                 }
+//                 var tmp: [32]u8 = undefined;
+//                 std.mem.copyForwards(u8, tmp[0..], k[0..32]);
+//                 opt.key = tmp;
+//             } else {
+//                 opt.key = null; // not keyed
+//             }
+//         }
+
+//         return .{ .inner = std.crypto.hash.Blake3.init(opt) };
+//     }
+
+//     pub fn update(self: *Blake3, data: []const u8) void {
+//         self.inner.update(data);
+//     }
+
+//     pub const Digest = [32]u8;
+
+//     pub fn final(self: *const Blake3) Digest {
+//         var out: [32]u8 = undefined;
+//         self.inner.final(out[0..]);
+//         return out;
+//     }
+// };
 
 fn xxh3_64_bytes(data: []const u8) u64 {
     var h = try Xxh3_64.init(null);
