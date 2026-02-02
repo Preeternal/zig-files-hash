@@ -99,7 +99,9 @@ const HashMode = enum { hash, hmac, keyed };
 const HashOptions = struct {
     mode: HashMode = .hash,
     seed: ?u64 = null,
-    key: ?[32]u8 = null,
+    // Blake3 key size 32 ([32]u8),
+    // Sha2_32 key size varies depending on variant ([?]u8)
+    key: ?[]u8 = null,
     // key_encoding: ?KeyEncoding = null,
 };
 
@@ -108,7 +110,7 @@ fn fileHash(comptime H: type, path: []const u8, options: ?HashOptions) !H.Digest
     defer file.close();
     var buf: [64 * 1024]u8 = undefined;
     const opt = options;
-    var hasher = H.init(opt);
+    var hasher = try H.init(opt);
 
     std.debug.print("Digest type = {any}\n", .{H.Digest});
 
@@ -139,7 +141,7 @@ fn Sha2_32(comptime Bits: u16) type {
 
         inner: Inner,
 
-        pub fn init(options: ?HashOptions) Self {
+        pub fn init(options: ?HashOptions) !Self {
             _ = options;
             return .{ .inner = Inner.init(.{}) };
         }
@@ -169,7 +171,7 @@ const Sha256 = Sha2_32(256);
 const Xxh3_64 = struct {
     inner: std.hash.XxHash3,
 
-    pub fn init(options: ?HashOptions) Xxh3_64 {
+    pub fn init(options: ?HashOptions) !Xxh3_64 {
         const seed: u64 = (options orelse HashOptions{}).seed orelse 0;
         return .{ .inner = std.hash.XxHash3.init(seed) };
     }
@@ -188,9 +190,23 @@ const Xxh3_64 = struct {
 const Blake3 = struct {
     inner: std.crypto.hash.Blake3,
 
-    pub fn init(options: ?HashOptions) Blake3 {
+    pub fn init(options: ?HashOptions) !Blake3 {
         var opt: std.crypto.hash.Blake3.Options = .{};
-        opt.key = if (options) |o| o.key else null;
+        if (options) |o| {
+            const is_keyed = o.mode == .keyed;
+            if (is_keyed) {
+                const k = o.key orelse return error.MissingKey;
+                if (k.len != 32) {
+                    return error.InvalidKeyLength;
+                }
+                var tmp: [32]u8 = undefined;
+                std.mem.copyForwards(u8, tmp[0..], k[0..32]);
+                opt.key = tmp;
+            } else {
+                opt.key = null; // not keyed
+            }
+        }
+
         return .{ .inner = std.crypto.hash.Blake3.init(opt) };
     }
 
@@ -208,7 +224,7 @@ const Blake3 = struct {
 };
 
 fn xxh3_64_bytes(data: []const u8) u64 {
-    var h = Xxh3_64.init(null);
+    var h = try Xxh3_64.init(null);
     h.update(data);
     return h.final();
 }
