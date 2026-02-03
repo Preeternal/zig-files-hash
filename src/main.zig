@@ -37,6 +37,30 @@ pub fn main() !void {
     const sha256_hex = std.fmt.bytesToHex(sha256, .lower);
     std.debug.print("SHA-256 = {s}\n", .{sha256_hex[0..]});
 
+    const hmacSha224 = try fileHash(HmacSha224, path, .{
+        .key = "my_secret_key",
+    });
+    const hmacSha224_hex = std.fmt.bytesToHex(hmacSha224, .lower);
+    std.debug.print("HMAC-SHA-224 = {s}\n", .{hmacSha224_hex[0..]});
+
+    const hmacSha256 = try fileHash(HmacSha256, path, .{
+        .key = "my_secret_key",
+    });
+    const hmacSha256_hex = std.fmt.bytesToHex(hmacSha256, .lower);
+    std.debug.print("HMAC-SHA-256 = {s}\n", .{hmacSha256_hex[0..]});
+
+    const hmacSha384 = try fileHash(HmacSha384, path, .{
+        .key = "my_secret_key",
+    });
+    const hmacSha384_hex = std.fmt.bytesToHex(hmacSha384, .lower);
+    std.debug.print("HMAC-SHA-384 = {s}\n", .{hmacSha384_hex[0..]});
+
+    const hmacSha512 = try fileHash(HmacSha512, path, .{
+        .key = "my_secret_key",
+    });
+    const hmacSha512_hex = std.fmt.bytesToHex(hmacSha512, .lower);
+    std.debug.print("HMAC-SHA-512 = {s}\n", .{hmacSha512_hex[0..]});
+
     var arr = [_]u8{ 10, 20, 30, 40, 50 };
 
     const slice1 = arr[1..4];
@@ -95,7 +119,7 @@ fn xxh3_64_file(path: []const u8) !u64 {
 //     | 'BLAKE3';
 // const Hasher = union(enum) { Xxh3_64: Xxh3_64 };
 
-const HashMode = enum { hash, hmac, keyed };
+// const HashMode = enum { hash, hmac, keyed };
 
 const HashOptions = struct {
     // mode: HashMode = .hash,
@@ -169,6 +193,42 @@ const Sha224 = Sha2_32(224);
 
 const Sha256 = Sha2_32(256);
 
+fn Hmac(comptime H: type) type {
+    return struct {
+        const Self = @This();
+
+        const Inner = H;
+
+        inner: Inner,
+
+        pub fn init(options: ?HashOptions) !Self {
+            if (options) |o| {
+                if (o.key) |k| {
+                    return .{ .inner = Inner.init(k) };
+                }
+            }
+            return error.KeyRequired;
+        }
+
+        pub fn update(self: *Self, data: []const u8) void {
+            self.inner.update(data);
+        }
+
+        pub const Digest = [H.mac_length]u8;
+
+        pub fn final(self: *Self) Digest {
+            var out: Digest = undefined;
+            self.inner.final(&out);
+            return out;
+        }
+    };
+}
+
+const HmacSha224 = Hmac(std.crypto.auth.hmac.sha2.HmacSha224);
+const HmacSha256 = Hmac(std.crypto.auth.hmac.sha2.HmacSha256);
+const HmacSha384 = Hmac(std.crypto.auth.hmac.sha2.HmacSha384);
+const HmacSha512 = Hmac(std.crypto.auth.hmac.sha2.HmacSha512);
+
 const Xxh3_64 = struct {
     inner: std.hash.XxHash3,
 
@@ -225,45 +285,6 @@ const Blake3 = struct {
         return out;
     }
 };
-
-// const Blake3 = Blake3Func(.hash);
-// const Blake3Keyed = Blake3Func(.keyed);
-
-// const Blake3 = struct {
-//     inner: std.crypto.hash.Blake3,
-
-//     pub fn init(options: ?HashOptions) !Blake3 {
-//         var opt: std.crypto.hash.Blake3.Options = .{};
-//         if (options) |o| {
-//             const is_keyed = o.mode == .keyed;
-//             if (is_keyed) {
-//                 const k = o.key orelse return error.MissingKey;
-//                 if (k.len != 32) {
-//                     return error.InvalidKeyLength;
-//                 }
-//                 var tmp: [32]u8 = undefined;
-//                 std.mem.copyForwards(u8, tmp[0..], k[0..32]);
-//                 opt.key = tmp;
-//             } else {
-//                 opt.key = null; // not keyed
-//             }
-//         }
-
-//         return .{ .inner = std.crypto.hash.Blake3.init(opt) };
-//     }
-
-//     pub fn update(self: *Blake3, data: []const u8) void {
-//         self.inner.update(data);
-//     }
-
-//     pub const Digest = [32]u8;
-
-//     pub fn final(self: *const Blake3) Digest {
-//         var out: [32]u8 = undefined;
-//         self.inner.final(out[0..]);
-//         return out;
-//     }
-// };
 
 fn xxh3_64_bytes(data: []const u8) u64 {
     var h = try Xxh3_64.init(null);
