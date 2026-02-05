@@ -61,6 +61,22 @@ pub fn main() !void {
     const hmacSha512_hex = std.fmt.bytesToHex(hmacSha512, .lower);
     std.debug.print("HMAC-SHA-512 = {s}\n", .{hmacSha512_hex[0..]});
 
+    const hmacMd5 = try fileHash(HmacMd5, path, .{
+        .key = "my_secret_key",
+    });
+    const hmacMd5_hex = std.fmt.bytesToHex(hmacMd5, .lower);
+    std.debug.print("HMAC-MD5 = {s}\n", .{hmacMd5_hex[0..]});
+
+    const hmacSha1 = try fileHash(HmacSha1, path, .{
+        .key = "my_secret_key",
+    });
+    const hmacSha1_hex = std.fmt.bytesToHex(hmacSha1, .lower);
+    std.debug.print("HMAC-SHA-1 = {s}\n", .{hmacSha1_hex[0..]});
+
+    const md5 = try fileHash(MD5, path, null);
+    const md5_hex = std.fmt.bytesToHex(md5, .lower);
+    std.debug.print("MD5 = {s}\n", .{md5_hex[0..]});
+
     var arr = [_]u8{ 10, 20, 30, 40, 50 };
 
     const slice1 = arr[1..4];
@@ -188,9 +204,7 @@ fn Sha2_32(comptime Bits: u16) type {
 }
 
 const Sha256T192 = Sha2_32(192);
-
 const Sha224 = Sha2_32(224);
-
 const Sha256 = Sha2_32(256);
 
 fn Hmac(comptime H: type) type {
@@ -228,6 +242,29 @@ const HmacSha224 = Hmac(std.crypto.auth.hmac.sha2.HmacSha224);
 const HmacSha256 = Hmac(std.crypto.auth.hmac.sha2.HmacSha256);
 const HmacSha384 = Hmac(std.crypto.auth.hmac.sha2.HmacSha384);
 const HmacSha512 = Hmac(std.crypto.auth.hmac.sha2.HmacSha512);
+const HmacMd5 = Hmac(std.crypto.auth.hmac.HmacMd5);
+const HmacSha1 = Hmac(std.crypto.auth.hmac.HmacSha1);
+
+const MD5 = struct {
+    inner: std.crypto.hash.Md5,
+
+    pub fn init(options: ?HashOptions) !MD5 {
+        _ = options;
+        return .{ .inner = std.crypto.hash.Md5.init(.{}) };
+    }
+
+    pub fn update(self: *MD5, data: []const u8) void {
+        self.inner.update(data);
+    }
+
+    pub const Digest = [16]u8;
+
+    pub fn final(self: *MD5) Digest {
+        var out: Digest = undefined;
+        self.inner.final(&out);
+        return out;
+    }
+};
 
 const Xxh3_64 = struct {
     inner: std.hash.XxHash3,
