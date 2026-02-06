@@ -25,6 +25,7 @@ pub fn main() void {
 
     // std.debug.print("a  = {any}\n", .{a});
     // std.debug.print("b  = {any}\n", .{b});
+    // std.debug.print("TypeOf(a)  = {s}\n", .{@typeName(@TypeOf(a))});
     // std.debug.print("TypeOf(b)  = {s}\n", .{@typeName(@TypeOf(b))});
     // std.debug.print("sizeOf(b)  = {d}\n", .{@sizeOf(@TypeOf(b))});
     // std.debug.print("b points to array len = {d}\n\n", .{b.*.len});
@@ -46,12 +47,12 @@ pub fn main() void {
     // });
 
     // массив из трёх булевских значений с false на конце
-    const a = [3:false]bool{ false, true, false };
+    const aa = [3:false]bool{ false, true, false };
 
-    std.debug.print("a = {any}\n", .{a});
+    std.debug.print("aa = {any}\n", .{aa});
 
     // эта строка более сложная, объясняться не будет
-    std.debug.print("{any}\n", .{std.mem.asBytes(&a).*});
+    std.debug.print("{any}\n", .{std.mem.asBytes(&aa).*});
 }
 
 pub const User = struct {

@@ -22,8 +22,15 @@ pub fn main() !void {
     std.debug.print("Xxh3_64 = {x}\n", .{xxh3_64});
 
     const blake3 = try fileHash(Blake3, path, null);
-    const blake3_hex = std.fmt.bytesToHex(blake3, .lower); // или .upper
-    std.debug.print("Blake3 = {s}\n", .{blake3_hex[0..]});
+    std.debug.print("Blake3 = {s}\n", .{toHex(blake3)[0..]});
+
+    const blake3_keyed = try fileHash(Blake3, path, .{
+        .key = "my_secret_key_123456789012122222", // must be 32 bytes for Blake3
+    });
+    std.debug.print("Blake3 keyed = {s}\n", .{toHex(blake3_keyed)[0..]});
+
+    const blake3_from_str = try stringHash(Blake3, "Hello, world!", null);
+    std.debug.print("Blake3 from string = {s}\n", .{toHex(blake3_from_str)[0..]});
 
     const sha256T192 = try fileHash(Sha256T192, path, null);
     const sha256T192_hex = std.fmt.bytesToHex(sha256T192, .lower);
@@ -76,51 +83,10 @@ pub fn main() !void {
     const md5 = try fileHash(MD5, path, null);
     const md5_hex = std.fmt.bytesToHex(md5, .lower);
     std.debug.print("MD5 = {s}\n", .{md5_hex[0..]});
-
-    var arr = [_]u8{ 10, 20, 30, 40, 50 };
-
-    const slice1 = arr[1..4];
-    const slice2 = arr[0..];
-    slice1[0] = 99;
-
-    var a: u8 = 0;
-    a += 1;
-
-    const slice3 = arr[a..4];
-
-    std.debug.print("arr    = {any}\n", .{arr});
-    std.debug.print("slice1 = {any}\n", .{slice1});
-    std.debug.print("slice2 = {any}\n", .{slice2});
-    std.debug.print("slice3 = {any}\n", .{slice3});
-
-    const s = "abc";
-    std.debug.print("xxh3('abc') = {x}\n", .{xxh3_64_bytes(s)});
-
-    var dh = DumbHasher.init();
-
-    dh.update("ab");
-    dh.update("c");
-
-    const result = dh.final();
-    std.debug.print("sum = {}\n", .{result});
 }
 
-fn xxh3_64_file(path: []const u8) !u64 {
-    var file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-    std.debug.print("File {any}\n", .{file});
-    var buf: [64 * 1024]u8 = undefined;
-    var hasher = Xxh3_64.init(null);
-    while (true) {
-        std.debug.print("prev buf len {any}\n", .{buf.len});
-        const n = try file.read(buf[0..]);
-        if (n == 0) {
-            return hasher.final();
-        }
-
-        const chunk = buf[0..n];
-        hasher.update(chunk);
-    }
+fn toHex(input: anytype) [input.len * 2]u8 {
+    return std.fmt.bytesToHex(input, .lower); // или .upper
 }
 
 // export type THashAlgorithm =
@@ -150,15 +116,9 @@ fn fileHash(comptime H: type, path: []const u8, options: ?HashOptions) !H.Digest
     var file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
     var buf: [64 * 1024]u8 = undefined;
-    const opt = options;
-    var hasher = try H.init(opt);
-
-    std.debug.print("Digest type = {any}\n", .{H.Digest});
-
-    std.debug.print("Digest size = {d}\n", .{@sizeOf(H.Digest)});
+    var hasher = try H.init(options);
 
     while (true) {
-        std.debug.print("prev buf len {any}\n", .{buf.len});
         const n = try file.read(buf[0..]);
         if (n == 0) {
             return hasher.final();
@@ -167,6 +127,12 @@ fn fileHash(comptime H: type, path: []const u8, options: ?HashOptions) !H.Digest
         const chunk = buf[0..n];
         hasher.update(chunk);
     }
+}
+
+fn stringHash(comptime H: type, data: []const u8, options: ?HashOptions) !H.Digest {
+    var hasher = try H.init(options);
+    hasher.update(data);
+    return hasher.final();
 }
 
 fn Sha2_32(comptime Bits: u16) type {
@@ -329,39 +295,21 @@ fn xxh3_64_bytes(data: []const u8) u64 {
     return h.final();
 }
 
-const DumbHasher = struct {
-    sum: u64,
+// test "simple test" {
+//     const gpa = std.testing.allocator;
+//     var list: std.ArrayList(i32) = .empty;
+//     defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
+//     try list.append(gpa, 42);
+//     try std.testing.expectEqual(@as(i32, 42), list.pop());
+// }
 
-    pub fn init() DumbHasher {
-        return .{ .sum = 0 };
-    }
-
-    pub fn update(self: *DumbHasher, data: []const u8) void {
-        for (data) |b| {
-            self.sum += b;
-        }
-    }
-
-    pub fn final(self: *const DumbHasher) u64 {
-        return self.sum;
-    }
-};
-
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
-}
+// test "fuzz example" {
+//     const Context = struct {
+//         fn testOne(context: @This(), input: []const u8) anyerror!void {
+//             _ = context;
+//             // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
+//             try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
+//         }
+//     };
+//     try std.testing.fuzz(Context{}, Context.testOne, .{});
+// }
