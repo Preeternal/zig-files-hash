@@ -289,10 +289,11 @@ const Blake3 = struct {
     }
 };
 
-fn xxh3_64_bytes(data: []const u8) u64 {
-    var h = try Xxh3_64.init(null);
-    h.update(data);
-    return h.final();
+test "deterministic string hash" {
+    const hash1 = try stringHash(Blake3, "Hello, world!", null);
+    const hash2 = try stringHash(Blake3, "Hello, world!", null);
+    try std.testing.expectEqual(hash1, hash2);
+    std.debug.print("✓ Deterministic string hash Test passed!\n", .{});
 }
 
 // test "simple test" {
