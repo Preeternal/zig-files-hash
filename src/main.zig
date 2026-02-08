@@ -83,10 +83,14 @@ fn calculateHashForEverything(path: [:0]const u8) !void {
 // const HashMode = enum { hash, hmac, keyed };
 
 const Algorithms = .{
-    Sha256T192, //
     Sha224,
     Sha256,
+    Sha384,
+    Sha512,
+    Sha512_224,
+    Sha512_256,
     MD5,
+    Sha1,
     Xxh3_64,
     Blake3,
     HmacSha224,
@@ -138,17 +142,15 @@ fn Sha2_32(comptime Bits: u16) type {
         const Self = @This();
 
         pub const name = switch (Bits) {
-            192 => "SHA-256/192",
             224 => "SHA-224",
             256 => "SHA-256",
             else => unreachable,
         };
 
         const Inner = switch (Bits) {
-            192 => std.crypto.hash.sha2.Sha256T192,
             224 => std.crypto.hash.sha2.Sha224,
             256 => std.crypto.hash.sha2.Sha256,
-            else => @compileError("Bits must be 192/224/256"),
+            else => @compileError("Bits must be 224/256"),
         };
 
         inner: Inner,
@@ -174,9 +176,79 @@ fn Sha2_32(comptime Bits: u16) type {
     };
 }
 
-const Sha256T192 = Sha2_32(192);
 const Sha224 = Sha2_32(224);
 const Sha256 = Sha2_32(256);
+
+fn Sha2_64(comptime Bits: u16) type {
+    return struct {
+        const Self = @This();
+
+        pub const name = switch (Bits) {
+            384 => "SHA-384",
+            512 => "SHA-512",
+            224 => "SHA-512/224",
+            256 => "SHA-512/256",
+            else => unreachable,
+        };
+
+        const Inner = switch (Bits) {
+            384 => std.crypto.hash.sha2.Sha384,
+            512 => std.crypto.hash.sha2.Sha512,
+            224 => std.crypto.hash.sha2.Sha512_224,
+            256 => std.crypto.hash.sha2.Sha512_256,
+            else => @compileError("Bits must be 384/512/224/256"),
+        };
+
+        inner: Inner,
+
+        pub fn init(options: ?HashOptions) !Self {
+            _ = options;
+            return .{ .inner = Inner.init(.{}) };
+        }
+
+        pub fn update(self: *Self, data: []const u8) void {
+            self.inner.update(data);
+        }
+
+        pub const digest_length = Bits / 8;
+
+        pub const Digest = [digest_length]u8;
+
+        pub fn final(self: *Self) Digest {
+            var out: [digest_length]u8 = undefined;
+            self.inner.final(&out);
+            return out;
+        }
+    };
+}
+
+const Sha384 = Sha2_64(384);
+const Sha512 = Sha2_64(512);
+const Sha512_224 = Sha2_64(224);
+const Sha512_256 = Sha2_64(256);
+
+const Sha1 = struct {
+    pub const name = "SHA-1";
+
+    inner: std.crypto.hash.Sha1,
+
+    pub fn init(options: ?HashOptions) !Sha1 {
+        _ = options;
+        return .{ .inner = std.crypto.hash.Sha1.init(.{}) };
+    }
+
+    pub fn update(self: *Sha1, data: []const u8) void {
+        self.inner.update(data);
+    }
+
+    pub const Digest = [20]u8;
+
+    pub fn final(self: *Sha1) Digest {
+        var out: Digest = undefined;
+        self.inner.final(&out);
+        return out;
+    }
+};
 
 fn Hmac(comptime H: type) type {
     return struct {
