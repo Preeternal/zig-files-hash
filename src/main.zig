@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin_mode = @import("builtin").mode;
 // const zig_files_hash = @import("zig_files_hash");
 
 pub fn main() !void {
@@ -8,14 +9,28 @@ pub fn main() !void {
     // const stdout = std.fs.File.stdout();
     // try stdout.writeAll("Ok\n");
 
-    const al = std.heap.page_allocator;
+    std.debug.print("Running in {s} mode\n", .{@tagName(builtin_mode)});
+
+    if (builtin_mode == .Debug) { // TODO: comment this condition before building release and use page_allocator for all modes
+        var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+        defer std.debug.assert(gpa.deinit() == .ok);
+
+        try run(gpa.allocator());
+    } else {
+        try run(std.heap.page_allocator);
+    }
+}
+
+fn run(al: std.mem.Allocator) !void {
     var args_iterator = try std.process.argsWithAllocator(al);
     defer args_iterator.deinit();
-    _ = args_iterator.next(); // skip 0 arg (program name)
+
+    _ = args_iterator.next(); // skip argv[0]
     const path = args_iterator.next() orelse {
         std.debug.print("Usage: zig build run -- <arg>\n", .{});
         return;
     };
+
     std.debug.print("First argument: {s}\n", .{path});
 
     try calculateHashForEverything(path);
@@ -43,13 +58,12 @@ fn calculateHashForEverything(path: [:0]const u8) !void {
             std.debug.print("BLAKE3-KEYED = {s}\n", .{toHex(h2)[0..]});
 
             continue;
-        } else {
-            const options = getOptionsForTests(H, null);
-            const h = try fileHash(H, path, options);
-            switch (H) {
-                Xxh3_64 => std.debug.print("{s} = {x}\n", .{ getAlgorithmName(H), h }),
-                else => std.debug.print("{s} = {s}\n", .{ getAlgorithmName(H), toHex(h)[0..] }),
-            }
+        }
+        const options = getOptionsForTests(H, null);
+        const h = try fileHash(H, path, options);
+        switch (H) {
+            Xxh3_64 => std.debug.print("{s} = {x}\n", .{ getAlgorithmName(H), h }),
+            else => std.debug.print("{s} = {s}\n", .{ getAlgorithmName(H), toHex(h)[0..] }),
         }
     }
 }
@@ -265,7 +279,6 @@ const Blake3 = struct {
 
     pub fn init(options: ?HashOptions) !Self {
         var opt: std.crypto.hash.Blake3.Options = .{};
-        opt.key = null; // not keyed by default
         if (options) |o| {
             if (o.key) |k| {
                 if (k.len != 32) {
