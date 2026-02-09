@@ -381,7 +381,7 @@ const Blake3 = struct {
 fn getOptionsForTests(comptime H: type, is_keyed_blake3: ?bool) ?HashOptions {
     if (is_keyed_blake3) |keyed| {
         if (keyed and H == Blake3) {
-            return HashOptions{ .key = "my_secret_key_123456789012122222" };
+            return HashOptions{ .key = "0123456789abcdef0123456789abcdef" };
         }
     }
     return switch (H) {
@@ -439,6 +439,121 @@ test "file hash determinism and consistency with string hash" {
         try expectFileHashDeterminismAndConsistency(H, null);
         if (H == Blake3) {
             try expectFileHashDeterminismAndConsistency(H, true);
+        }
+    }
+}
+
+test "Blake3 rejects key with invalid length" {
+    const options = HashOptions{ .key = "short_key" };
+    try std.testing.expectError(error.InvalidKeyLength, Blake3.init(options));
+}
+
+test "key is required for HMAC algorithms" {
+    inline for (Algorithms) |H| {
+        switch (H) {
+            HmacSha224, HmacSha256, HmacSha384, HmacSha512, HmacMd5, HmacSha1 => {
+                try std.testing.expectError(error.KeyRequired, H.init(null));
+            },
+            else => continue,
+        }
+    }
+}
+
+test "different input produces different hash" {
+    const data1 = "Hello, world!";
+    const data2 = "Hello, world?";
+    inline for (Algorithms) |H| {
+        const options = getOptionsForTests(H, null);
+        const hash1 = try stringHash(H, data1, options);
+        const hash2 = try stringHash(H, data2, options);
+        if (H == Xxh3_64) {
+            try std.testing.expect(hash1 != hash2);
+        } else {
+            try std.testing.expect(!std.mem.eql(u8, hash1[0..], hash2[0..]));
+        }
+    }
+}
+
+test "different options produce different hash" {
+    const data = "Hello, world!";
+    inline for (Algorithms) |H| {
+        switch (H) {
+            Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256, MD5, Sha1 => {
+                // no options, skip
+                continue;
+            },
+            Blake3 => {
+                // test keyed vs unkeyed
+                const options1 = getOptionsForTests(H, null);
+                const options2 = getOptionsForTests(H, true);
+
+                const hash1 = try stringHash(H, data, options1);
+                const hash2 = try stringHash(H, data, options2);
+                try std.testing.expect(!std.mem.eql(u8, hash1[0..], hash2[0..]));
+                continue;
+            },
+            Xxh3_64 => {
+                // test different seeds
+                const options1 = getOptionsForTests(H, null);
+                const options2 = HashOptions{ .seed = 12345 };
+
+                const hash1 = try stringHash(H, data, options1);
+                const hash2 = try stringHash(H, data, options2);
+                try std.testing.expect(hash1 != hash2);
+                continue;
+            },
+            else => {
+                // for HMAC algorithms test different keys
+                const options1 = getOptionsForTests(H, null);
+                const options2 = HashOptions{ .key = "different_key" };
+
+                const hash1 = try stringHash(H, data, options1);
+                const hash2 = try stringHash(H, data, options2);
+                try std.testing.expect(!std.mem.eql(u8, hash1[0..], hash2[0..]));
+                continue;
+            },
+        }
+    }
+}
+
+test "empty input produces deterministic hash" {
+    const empty: []const u8 = "";
+    inline for (Algorithms) |H| {
+        const options = getOptionsForTests(H, null);
+        const hash1 = try stringHash(H, empty, options);
+        const hash2 = try stringHash(H, empty, options);
+        // Only check determinism for empty input (no known-good hash comparison).
+        try std.testing.expectEqual(hash1, hash2);
+    }
+}
+
+test "multi-chunk file (>64KB) hash matches string hash" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const sub_path = "test.bin";
+    var data: [70 * 1024]u8 = undefined;
+    for (&data, 0..) |*b, i| {
+        b.* = @as(u8, @intCast(i % 256));
+    }
+
+    {
+        const file = try tmp.dir.createFile(sub_path, .{
+            .truncate = true,
+        });
+        defer file.close();
+        try file.writeAll(data[0..]);
+    }
+    inline for (Algorithms) |H| {
+        const options = getOptionsForTests(H, null);
+        const hash1 = try fileHashInDir(H, tmp.dir, sub_path, options);
+        const hash2 = try stringHash(H, data[0..], options);
+        try std.testing.expectEqual(hash1, hash2);
+
+        if (H == Blake3) {
+            const options_keyed = getOptionsForTests(H, true);
+            const hash_keyed_1 = try fileHashInDir(H, tmp.dir, sub_path, options_keyed);
+            const hash_keyed_2 = try stringHash(H, data[0..], options_keyed);
+            try std.testing.expectEqual(hash_keyed_1, hash_keyed_2);
         }
     }
 }
