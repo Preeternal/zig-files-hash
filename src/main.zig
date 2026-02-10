@@ -110,6 +110,11 @@ const HashOptions = struct {
     // key_encoding: ?KeyEncoding = null,
 };
 
+const Error = error{
+    KeyRequired,
+    InvalidKeyLength,
+};
+
 pub fn fileHashInDir(comptime H: type, dir: std.fs.Dir, sub_path: []const u8, options: ?HashOptions) !H.Digest {
     var file = try dir.openFile(sub_path, .{});
     defer file.close();
@@ -274,7 +279,7 @@ fn Hmac(comptime H: type) type {
                     return .{ .inner = Inner.init(k) };
                 }
             }
-            return error.KeyRequired;
+            return Error.KeyRequired;
         }
 
         pub fn update(self: *Self, data: []const u8) void {
@@ -354,7 +359,7 @@ const Blake3 = struct {
         if (options) |o| {
             if (o.key) |k| {
                 if (k.len != 32) {
-                    return error.InvalidKeyLength;
+                    return Error.InvalidKeyLength;
                 }
                 var tmp: [32]u8 = undefined;
                 std.mem.copyForwards(u8, tmp[0..], k[0..32]);
@@ -445,14 +450,14 @@ test "file hash determinism and consistency with string hash" {
 
 test "Blake3 rejects key with invalid length" {
     const options = HashOptions{ .key = "short_key" };
-    try std.testing.expectError(error.InvalidKeyLength, Blake3.init(options));
+    try std.testing.expectError(Error.InvalidKeyLength, Blake3.init(options));
 }
 
 test "key is required for HMAC algorithms" {
     inline for (Algorithms) |H| {
         switch (H) {
             HmacSha224, HmacSha256, HmacSha384, HmacSha512, HmacMd5, HmacSha1 => {
-                try std.testing.expectError(error.KeyRequired, H.init(null));
+                try std.testing.expectError(Error.KeyRequired, H.init(null));
             },
             else => continue,
         }
