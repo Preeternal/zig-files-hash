@@ -34,10 +34,10 @@ fn run(al: std.mem.Allocator) !void {
     std.debug.print("First argument: {s}\n", .{path});
 
     try calculateHashForEverything(path);
-}
 
-fn toHex(input: anytype) [input.len * 2]u8 {
-    return std.fmt.bytesToHex(input, .lower); // или .upper
+    var out_buf: [64]u8 = undefined;
+    const size = try fileHashPub(HashAlgorithm.BLAKE3, path, null, out_buf[0..]);
+    std.debug.print("BLAKE3 (public API) = {x}\n", .{out_buf[0..size]});
 }
 
 fn getAlgorithmName(comptime H: type) []const u8 {
@@ -50,21 +50,18 @@ fn calculateHashForEverything(path: [:0]const u8) !void {
         if (H == Blake3) {
             // 1) unkeyed
             const h1 = try fileHash(Blake3, path, null);
-            std.debug.print("BLAKE3 = {s}\n", .{toHex(h1)[0..]});
+            std.debug.print("BLAKE3 = {x}\n", .{h1});
 
             // 2) keyed
-            const opts = HashOptions{ .key = "my_secret_key_123456789012122222" };
+            const opts = HashOptions{ .key = "0123456789abcdef0123456789abcdef" };
             const h2 = try fileHash(Blake3, path, opts);
-            std.debug.print("BLAKE3-KEYED = {s}\n", .{toHex(h2)[0..]});
+            std.debug.print("BLAKE3-KEYED = {x}\n", .{h2});
 
             continue;
         }
         const options = getOptionsForTests(H, null);
         const h = try fileHash(H, path, options);
-        switch (H) {
-            Xxh3_64 => std.debug.print("{s} = {x}\n", .{ getAlgorithmName(H), h }),
-            else => std.debug.print("{s} = {s}\n", .{ getAlgorithmName(H), toHex(h)[0..] }),
-        }
+        std.debug.print("{s} = {x}\n", .{ getAlgorithmName(H), h });
     }
 }
 
@@ -101,6 +98,25 @@ const Algorithms = .{
     HmacSha1,
 };
 
+const HashAlgorithm = enum {
+    @"SHA-224",
+    @"SHA-256",
+    @"SHA-384",
+    @"SHA-512",
+    @"SHA-512/224",
+    @"SHA-512/256",
+    MD5,
+    @"SHA-1",
+    @"XXH3-64",
+    BLAKE3,
+    @"HMAC-SHA-224",
+    @"HMAC-SHA-256",
+    @"HMAC-SHA-384",
+    @"HMAC-SHA-512",
+    @"HMAC-MD5",
+    @"HMAC-SHA-1",
+};
+
 const HashOptions = struct {
     // mode: HashMode = .hash,
     seed: ?u64 = null,
@@ -113,9 +129,10 @@ const HashOptions = struct {
 const Error = error{
     KeyRequired,
     InvalidKeyLength,
+    BufferTooSmall,
 };
 
-pub fn fileHashInDir(comptime H: type, dir: std.fs.Dir, sub_path: []const u8, options: ?HashOptions) !H.Digest {
+fn fileHashInDir(comptime H: type, dir: std.fs.Dir, sub_path: []const u8, options: ?HashOptions) !H.Digest {
     var file = try dir.openFile(sub_path, .{});
     defer file.close();
     var buf: [64 * 1024]u8 = undefined;
@@ -129,6 +146,141 @@ pub fn fileHashInDir(comptime H: type, dir: std.fs.Dir, sub_path: []const u8, op
 
         const chunk = buf[0..n];
         hasher.update(chunk);
+    }
+}
+
+pub fn fileHashPub(al: HashAlgorithm, path: []const u8, options: ?HashOptions, out: []u8) !usize {
+    switch (al) {
+        .@"SHA-224" => {
+            const result = try fileHash(Sha224, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"SHA-256" => {
+            const result = try fileHash(Sha256, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"SHA-384" => {
+            const result = try fileHash(Sha384, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"SHA-512" => {
+            const result = try fileHash(Sha512, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"SHA-512/224" => {
+            const result = try fileHash(Sha512_224, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"SHA-512/256" => {
+            const result = try fileHash(Sha512_256, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .MD5 => {
+            const result = try fileHash(MD5, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"SHA-1" => {
+            const result = try fileHash(Sha1, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"XXH3-64" => {
+            const result = try fileHash(Xxh3_64, path, options);
+            const size = @sizeOf(u64); // @sizeOf(@TypeOf(result));
+            if (out.len < size) { // if (out.len < @sizeOf(@TypeOf(result))) {
+                return Error.BufferTooSmall;
+            }
+            const result_bytes = std.mem.asBytes(&result);
+            @memcpy(out[0..size], result_bytes[0..]);
+            return size;
+        },
+        .BLAKE3 => {
+            const result = try fileHash(Blake3, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"HMAC-SHA-224" => {
+            const result = try fileHash(HmacSha224, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"HMAC-SHA-256" => {
+            const result = try fileHash(HmacSha256, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"HMAC-SHA-384" => {
+            const result = try fileHash(HmacSha384, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"HMAC-SHA-512" => {
+            const result = try fileHash(HmacSha512, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"HMAC-MD5" => {
+            const result = try fileHash(HmacMd5, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
+        .@"HMAC-SHA-1" => {
+            const result = try fileHash(HmacSha1, path, options);
+            if (out.len < result.len) {
+                return Error.BufferTooSmall;
+            }
+            @memcpy(out[0..result.len], result[0..]);
+            return result.len;
+        },
     }
 }
 
