@@ -37,7 +37,10 @@ fn run(al: std.mem.Allocator) !void {
 
     var out_buf: [max_digest_length]u8 = undefined;
     const size = try fileHashPub(HashAlgorithm.BLAKE3, path, null, out_buf[0..]);
-    std.debug.print("BLAKE3 (public API) = {x}\n", .{out_buf[0..size]});
+    std.debug.print("BLAKE3 (public API file input) = {x}\n", .{out_buf[0..size]});
+
+    const size2 = try stringHashPub(HashAlgorithm.BLAKE3, "Hello, world!", null, out_buf[0..]);
+    std.debug.print("BLAKE3 (public API string input) = {x}\n", .{out_buf[0..size2]});
 }
 
 fn calculateHashForEverything(path: [:0]const u8) !void {
@@ -196,7 +199,7 @@ fn fileHashInDir(comptime H: type, dir: std.fs.Dir, sub_path: []const u8, option
     }
 }
 
-fn writeHash(H: type, path: []const u8, options: ?HashOptions, out: []u8) !usize {
+fn writeFileHash(H: type, path: []const u8, options: ?HashOptions, out: []u8) !usize {
     const result = try fileHash(H, path, options);
     const result_bytes = std.mem.asBytes(&result);
     if (out.len < result_bytes.len) {
@@ -210,7 +213,27 @@ pub fn fileHashPub(al: HashAlgorithm, path: []const u8, options: ?HashOptions, o
     // std.debug.print("Calculating {s} hash for {s}\n", .{ @tagName(al), path });
     inline for (AlgorithmSpecs) |spec| {
         if (al == spec.tag) {
-            return writeHash(spec.H, path, options, out);
+            return writeFileHash(spec.H, path, options, out);
+        }
+    }
+    unreachable;
+}
+
+fn writeStringHash(H: type, data: []const u8, options: ?HashOptions, out: []u8) !usize {
+    const result = try stringHash(H, data, options);
+    const result_bytes = std.mem.asBytes(&result);
+    if (out.len < result_bytes.len) {
+        return Error.BufferTooSmall;
+    }
+    @memcpy(out[0..result_bytes.len], result_bytes);
+    return result_bytes.len;
+}
+
+pub fn stringHashPub(al: HashAlgorithm, data: []const u8, options: ?HashOptions, out: []u8) !usize {
+    // std.debug.print("Calculating {s} hash for string input\n", .{ @tagName(al) });
+    inline for (AlgorithmSpecs) |spec| {
+        if (al == spec.tag) {
+            return writeStringHash(spec.H, data, options, out);
         }
     }
     unreachable;
@@ -650,6 +673,59 @@ test "multi-chunk file (>64KB) hash matches string hash" {
             const hash_keyed_1 = try fileHashInDir(H, tmp.dir, sub_path, options_keyed);
             const hash_keyed_2 = try stringHash(H, data[0..], options_keyed);
             try std.testing.expectEqual(hash_keyed_1, hash_keyed_2);
+        }
+    }
+}
+
+test "Public API produces same hash as direct API" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const data = "Hello, world!";
+    const file_name = "test.bin";
+
+    {
+        const file = try tmp.dir.createFile(file_name, .{
+            .truncate = true,
+        });
+        defer file.close();
+        try file.writeAll(data);
+    }
+
+    inline for (AlgorithmSpecs) |spec| {
+        const H = spec.H;
+        const T = spec.tag;
+        const options = getOptionsForTests(H, null);
+
+        var out_buf: [max_digest_length]u8 = undefined;
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+
+        const digest_file = try fileHashInDir(H, tmp.dir, file_name, options);
+        const expected_bytes_file = std.mem.asBytes(&digest_file);
+        const real_path = try tmp.dir.realpath(file_name, &path_buf);
+        const size_file = try fileHashPub(T, real_path, options, out_buf[0..]);
+        const public_bytes_file = out_buf[0..size_file];
+        try std.testing.expectEqualSlices(u8, expected_bytes_file, public_bytes_file);
+
+        const digest_str = try stringHash(H, data, options);
+        const expected_bytes_str = std.mem.asBytes(&digest_str);
+        const size_str = try stringHashPub(T, data, options, out_buf[0..]);
+        const public_bytes_str = out_buf[0..size_str];
+        try std.testing.expectEqualSlices(u8, expected_bytes_str, public_bytes_str);
+
+        if (H == Blake3) {
+            const options_keyed = getOptionsForTests(H, true);
+
+            const digest_file_keyed = try fileHashInDir(H, tmp.dir, file_name, options_keyed);
+            const expected_bytes_file_keyed = std.mem.asBytes(&digest_file_keyed);
+            const size_file_keyed = try fileHashPub(T, real_path, options_keyed, out_buf[0..]);
+            const public_bytes_file_keyed = out_buf[0..size_file_keyed];
+            try std.testing.expectEqualSlices(u8, expected_bytes_file_keyed, public_bytes_file_keyed);
+
+            const digest_str_keyed = try stringHash(H, data, options_keyed);
+            const expected_bytes_str_keyed = std.mem.asBytes(&digest_str_keyed);
+            const size_str_keyed = try stringHashPub(T, data, options_keyed, out_buf[0..]);
+            const public_bytes_str_keyed = out_buf[0..size_str_keyed];
+            try std.testing.expectEqualSlices(u8, expected_bytes_str_keyed, public_bytes_str_keyed);
         }
     }
 }
