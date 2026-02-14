@@ -35,18 +35,14 @@ fn run(al: std.mem.Allocator) !void {
 
     try calculateHashForEverything(path);
 
-    var out_buf: [64]u8 = undefined;
+    var out_buf: [max_digest_length]u8 = undefined;
     const size = try fileHashPub(HashAlgorithm.BLAKE3, path, null, out_buf[0..]);
     std.debug.print("BLAKE3 (public API) = {x}\n", .{out_buf[0..size]});
 }
 
-fn getAlgorithmName(comptime H: type) []const u8 {
-    if (@hasDecl(H, "name")) return H.name;
-    return @typeName(H);
-}
-
 fn calculateHashForEverything(path: [:0]const u8) !void {
-    inline for (Algorithms) |H| {
+    inline for (AlgorithmSpecs) |spec| {
+        const H = spec.H;
         if (H == Blake3) {
             // 1) unkeyed
             const h1 = try fileHash(Blake3, path, null);
@@ -61,7 +57,7 @@ fn calculateHashForEverything(path: [:0]const u8) !void {
         }
         const options = getOptionsForTests(H, null);
         const h = try fileHash(H, path, options);
-        std.debug.print("{s} = {x}\n", .{ getAlgorithmName(H), h });
+        std.debug.print("{s} = {x}\n", .{ spec.H.name, h });
     }
 }
 
@@ -78,25 +74,6 @@ fn calculateHashForEverything(path: [:0]const u8) !void {
 // const Hasher = union(enum) { Xxh3_64: Xxh3_64 };
 
 // const HashMode = enum { hash, hmac, keyed };
-
-const Algorithms = .{
-    Sha224,
-    Sha256,
-    Sha384,
-    Sha512,
-    Sha512_224,
-    Sha512_256,
-    MD5,
-    Sha1,
-    Xxh3_64,
-    Blake3,
-    HmacSha224,
-    HmacSha256,
-    HmacSha384,
-    HmacSha512,
-    HmacMd5,
-    HmacSha1,
-};
 
 const HashAlgorithm = enum {
     @"SHA-224",
@@ -115,6 +92,76 @@ const HashAlgorithm = enum {
     @"HMAC-SHA-512",
     @"HMAC-MD5",
     @"HMAC-SHA-1",
+};
+
+const AlgorithmSpec = struct {
+    tag: HashAlgorithm,
+    H: type,
+};
+
+const AlgorithmSpecs = [_]AlgorithmSpec{
+    .{ .tag = .@"SHA-224", .H = Sha224 },
+    .{ .tag = .@"SHA-256", .H = Sha256 },
+    .{ .tag = .@"SHA-384", .H = Sha384 },
+    .{ .tag = .@"SHA-512", .H = Sha512 },
+    .{ .tag = .@"SHA-512/224", .H = Sha512_224 },
+    .{ .tag = .@"SHA-512/256", .H = Sha512_256 },
+    .{ .tag = .MD5, .H = MD5 },
+    .{ .tag = .@"SHA-1", .H = Sha1 },
+    .{ .tag = .@"XXH3-64", .H = Xxh3_64 },
+    .{ .tag = .BLAKE3, .H = Blake3 },
+    .{ .tag = .@"HMAC-SHA-224", .H = HmacSha224 },
+    .{ .tag = .@"HMAC-SHA-256", .H = HmacSha256 },
+    .{ .tag = .@"HMAC-SHA-384", .H = HmacSha384 },
+    .{ .tag = .@"HMAC-SHA-512", .H = HmacSha512 },
+    .{ .tag = .@"HMAC-MD5", .H = HmacMd5 },
+    .{ .tag = .@"HMAC-SHA-1", .H = HmacSha1 },
+};
+
+comptime {
+    const enum_fields = @typeInfo(HashAlgorithm).@"enum".fields;
+    if (AlgorithmSpecs.len != enum_fields.len) {
+        @compileError("AlgorithmSpecs.len must match HashAlgorithm enum size");
+    }
+}
+
+comptime {
+    const enum_fields = @typeInfo(HashAlgorithm).@"enum".fields;
+
+    var seen: [enum_fields.len]bool = .{false} ** enum_fields.len;
+
+    for (AlgorithmSpecs) |spec| {
+        const idx = @intFromEnum(@as(HashAlgorithm, spec.tag));
+        if (seen[idx]) {
+            @compileError("Duplicate tag in AlgorithmSpecs: " ++ @tagName(spec.tag));
+        }
+        seen[idx] = true;
+    }
+
+    for (seen, 0..) |ok, i| {
+        if (!ok) {
+            @compileError("Missing spec for HashAlgorithm: " ++ enum_fields[i].name);
+        }
+    }
+}
+
+fn digestLengthBytes(comptime H: type) usize {
+    const Digest = H.Digest;
+    return switch (@typeInfo(Digest)) {
+        .array => |a| a.len,
+        else => @sizeOf(Digest),
+    };
+}
+
+pub const max_digest_length = blk: {
+    var max = 0;
+    for (AlgorithmSpecs) |spec| {
+        const len = digestLengthBytes(spec.H);
+        if (len > max) {
+            max = len;
+        }
+    }
+    break :blk max;
 };
 
 const HashOptions = struct {
@@ -149,139 +196,24 @@ fn fileHashInDir(comptime H: type, dir: std.fs.Dir, sub_path: []const u8, option
     }
 }
 
-pub fn fileHashPub(al: HashAlgorithm, path: []const u8, options: ?HashOptions, out: []u8) !usize {
-    switch (al) {
-        .@"SHA-224" => {
-            const result = try fileHash(Sha224, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"SHA-256" => {
-            const result = try fileHash(Sha256, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"SHA-384" => {
-            const result = try fileHash(Sha384, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"SHA-512" => {
-            const result = try fileHash(Sha512, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"SHA-512/224" => {
-            const result = try fileHash(Sha512_224, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"SHA-512/256" => {
-            const result = try fileHash(Sha512_256, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .MD5 => {
-            const result = try fileHash(MD5, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"SHA-1" => {
-            const result = try fileHash(Sha1, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"XXH3-64" => {
-            const result = try fileHash(Xxh3_64, path, options);
-            const size = @sizeOf(u64); // @sizeOf(@TypeOf(result));
-            if (out.len < size) { // if (out.len < @sizeOf(@TypeOf(result))) {
-                return Error.BufferTooSmall;
-            }
-            const result_bytes = std.mem.asBytes(&result);
-            @memcpy(out[0..size], result_bytes[0..]);
-            return size;
-        },
-        .BLAKE3 => {
-            const result = try fileHash(Blake3, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"HMAC-SHA-224" => {
-            const result = try fileHash(HmacSha224, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"HMAC-SHA-256" => {
-            const result = try fileHash(HmacSha256, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"HMAC-SHA-384" => {
-            const result = try fileHash(HmacSha384, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"HMAC-SHA-512" => {
-            const result = try fileHash(HmacSha512, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"HMAC-MD5" => {
-            const result = try fileHash(HmacMd5, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
-        .@"HMAC-SHA-1" => {
-            const result = try fileHash(HmacSha1, path, options);
-            if (out.len < result.len) {
-                return Error.BufferTooSmall;
-            }
-            @memcpy(out[0..result.len], result[0..]);
-            return result.len;
-        },
+fn writeHash(H: type, path: []const u8, options: ?HashOptions, out: []u8) !usize {
+    const result = try fileHash(H, path, options);
+    const result_bytes = std.mem.asBytes(&result);
+    if (out.len < result_bytes.len) {
+        return Error.BufferTooSmall;
     }
+    @memcpy(out[0..result_bytes.len], result_bytes);
+    return result_bytes.len;
+}
+
+pub fn fileHashPub(al: HashAlgorithm, path: []const u8, options: ?HashOptions, out: []u8) !usize {
+    // std.debug.print("Calculating {s} hash for {s}\n", .{ @tagName(al), path });
+    inline for (AlgorithmSpecs) |spec| {
+        if (al == spec.tag) {
+            return writeHash(spec.H, path, options, out);
+        }
+    }
+    unreachable;
 }
 
 fn fileHash(comptime H: type, path: []const u8, options: ?HashOptions) !H.Digest {
@@ -558,7 +490,8 @@ fn expectDeterministicStringHash(comptime H: type, is_keyed_blake3: ?bool) !void
 }
 
 test "deterministic string hash" {
-    inline for (Algorithms) |H| {
+    inline for (AlgorithmSpecs) |spec| {
+        const H = spec.H;
         try expectDeterministicStringHash(H, null);
         if (H == Blake3) {
             try expectDeterministicStringHash(H, true);
@@ -592,7 +525,8 @@ fn expectFileHashDeterminismAndConsistency(comptime H: type, is_keyed_blake3: ?b
 }
 
 test "file hash determinism and consistency with string hash" {
-    inline for (Algorithms) |H| {
+    inline for (AlgorithmSpecs) |spec| {
+        const H = spec.H;
         try expectFileHashDeterminismAndConsistency(H, null);
         if (H == Blake3) {
             try expectFileHashDeterminismAndConsistency(H, true);
@@ -606,7 +540,8 @@ test "Blake3 rejects key with invalid length" {
 }
 
 test "key is required for HMAC algorithms" {
-    inline for (Algorithms) |H| {
+    inline for (AlgorithmSpecs) |spec| {
+        const H = spec.H;
         switch (H) {
             HmacSha224, HmacSha256, HmacSha384, HmacSha512, HmacMd5, HmacSha1 => {
                 try std.testing.expectError(Error.KeyRequired, H.init(null));
@@ -619,7 +554,8 @@ test "key is required for HMAC algorithms" {
 test "different input produces different hash" {
     const data1 = "Hello, world!";
     const data2 = "Hello, world?";
-    inline for (Algorithms) |H| {
+    inline for (AlgorithmSpecs) |spec| {
+        const H = spec.H;
         const options = getOptionsForTests(H, null);
         const hash1 = try stringHash(H, data1, options);
         const hash2 = try stringHash(H, data2, options);
@@ -633,7 +569,8 @@ test "different input produces different hash" {
 
 test "different options produce different hash" {
     const data = "Hello, world!";
-    inline for (Algorithms) |H| {
+    inline for (AlgorithmSpecs) |spec| {
+        const H = spec.H;
         switch (H) {
             Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256, MD5, Sha1 => {
                 // no options, skip
@@ -675,7 +612,8 @@ test "different options produce different hash" {
 
 test "empty input produces deterministic hash" {
     const empty: []const u8 = "";
-    inline for (Algorithms) |H| {
+    inline for (AlgorithmSpecs) |spec| {
+        const H = spec.H;
         const options = getOptionsForTests(H, null);
         const hash1 = try stringHash(H, empty, options);
         const hash2 = try stringHash(H, empty, options);
@@ -700,7 +638,8 @@ test "multi-chunk file (>64KB) hash matches string hash" {
         defer file.close();
         try file.writeAll(data[0..]);
     }
-    inline for (Algorithms) |H| {
+    inline for (AlgorithmSpecs) |spec| {
+        const H = spec.H;
         const options = getOptionsForTests(H, null);
         const hash1 = try fileHashInDir(H, tmp.dir, sub_path, options);
         const hash2 = try stringHash(H, data[0..], options);
