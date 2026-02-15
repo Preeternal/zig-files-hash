@@ -46,21 +46,12 @@ fn run(al: std.mem.Allocator) !void {
 fn calculateHashForEverything(path: [:0]const u8) !void {
     inline for (AlgorithmSpecs) |spec| {
         const H = spec.H;
-        if (H == Blake3) {
-            // 1) unkeyed
-            const h1 = try fileHash(Blake3, path, null);
-            std.debug.print("BLAKE3 = {x}\n", .{h1});
-
-            // 2) keyed
-            const opts = HashOptions{ .key = "0123456789abcdef0123456789abcdef" };
-            const h2 = try fileHash(Blake3, path, opts);
-            std.debug.print("BLAKE3-KEYED = {x}\n", .{h2});
-
-            continue;
+        const options_array = getOptionsArrayForTests(H);
+        for (options_array, 0..) |options, i| {
+            const h = try fileHash(H, path, options);
+            const suffix = if (H == Blake3 and i == 1) "-KEYED" else "";
+            std.debug.print("{s}{s} = {x}\n", .{ spec.H.name, suffix, h });
         }
-        const options = getOptionsForTests(H, null);
-        const h = try fileHash(H, path, options);
-        std.debug.print("{s} = {x}\n", .{ spec.H.name, h });
     }
 }
 
@@ -490,39 +481,37 @@ const Blake3 = struct {
     }
 };
 
-fn getOptionsForTests(comptime H: type, is_keyed_blake3: ?bool) ?HashOptions {
-    if (is_keyed_blake3) |keyed| {
-        if (keyed and H == Blake3) {
-            return HashOptions{ .key = "0123456789abcdef0123456789abcdef" };
-        }
-    }
+fn getOptionsArrayForTests(comptime H: type) []const ?HashOptions {
     return switch (H) {
-        HmacSha224, HmacSha256, HmacSha384, HmacSha512, HmacMd5, HmacSha1 => .{
-            .key = "my_secret_key",
+        Blake3 => &[2]?HashOptions{
+            null,
+            .{ .key = "0123456789abcdef0123456789abcdef" },
         },
-        else => null,
+        HmacSha224, HmacSha256, HmacSha384, HmacSha512, HmacMd5, HmacSha1 => &[1]?HashOptions{
+            .{ .key = "my_secret_key" },
+        },
+        else => &[1]?HashOptions{null},
     };
 }
 
-fn expectDeterministicStringHash(comptime H: type, is_keyed_blake3: ?bool) !void {
-    const options = getOptionsForTests(H, is_keyed_blake3);
-    const data = "Hello, world!";
-    const hash1 = try stringHash(H, data, options);
-    const hash2 = try stringHash(H, data, options);
-    try std.testing.expectEqual(hash1, hash2);
+fn expectDeterministicStringHash(comptime H: type) !void {
+    const options_array = getOptionsArrayForTests(H);
+    for (options_array) |options| {
+        const data = "Hello, world!";
+        const hash1 = try stringHash(H, data, options);
+        const hash2 = try stringHash(H, data, options);
+        try std.testing.expectEqual(hash1, hash2);
+    }
 }
 
 test "deterministic string hash" {
     inline for (AlgorithmSpecs) |spec| {
         const H = spec.H;
-        try expectDeterministicStringHash(H, null);
-        if (H == Blake3) {
-            try expectDeterministicStringHash(H, true);
-        }
+        try expectDeterministicStringHash(H);
     }
 }
 
-fn expectFileHashDeterminismAndConsistency(comptime H: type, is_keyed_blake3: ?bool) !void {
+fn expectFileHashDeterminismAndConsistency(comptime H: type) !void {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const sub_path = "test.bin";
@@ -536,24 +525,22 @@ fn expectFileHashDeterminismAndConsistency(comptime H: type, is_keyed_blake3: ?b
         try file.writeAll(data);
     }
 
-    const options = getOptionsForTests(H, is_keyed_blake3);
+    const options_array = getOptionsArrayForTests(H);
+    for (options_array) |options| {
+        const hash1 = try fileHashInDir(H, tmp.dir, sub_path, options);
+        const hash2 = try fileHashInDir(H, tmp.dir, sub_path, options);
 
-    const hash1 = try fileHashInDir(H, tmp.dir, sub_path, options);
-    const hash2 = try fileHashInDir(H, tmp.dir, sub_path, options);
+        try std.testing.expectEqual(hash1, hash2);
 
-    try std.testing.expectEqual(hash1, hash2);
-
-    const hash3 = try stringHash(H, data, options);
-    try std.testing.expectEqual(hash1, hash3);
+        const hash3 = try stringHash(H, data, options);
+        try std.testing.expectEqual(hash1, hash3);
+    }
 }
 
 test "file hash determinism and consistency with string hash" {
     inline for (AlgorithmSpecs) |spec| {
         const H = spec.H;
-        try expectFileHashDeterminismAndConsistency(H, null);
-        if (H == Blake3) {
-            try expectFileHashDeterminismAndConsistency(H, true);
-        }
+        try expectFileHashDeterminismAndConsistency(H);
     }
 }
 
@@ -579,13 +566,15 @@ test "different input produces different hash" {
     const data2 = "Hello, world?";
     inline for (AlgorithmSpecs) |spec| {
         const H = spec.H;
-        const options = getOptionsForTests(H, null);
-        const hash1 = try stringHash(H, data1, options);
-        const hash2 = try stringHash(H, data2, options);
-        if (H == Xxh3_64) {
-            try std.testing.expect(hash1 != hash2);
-        } else {
-            try std.testing.expect(!std.mem.eql(u8, hash1[0..], hash2[0..]));
+        const options_array = getOptionsArrayForTests(H);
+        for (options_array) |options| {
+            const hash1 = try stringHash(H, data1, options);
+            const hash2 = try stringHash(H, data2, options);
+            if (H == Xxh3_64) {
+                try std.testing.expect(hash1 != hash2);
+            } else {
+                try std.testing.expect(!std.mem.eql(u8, hash1[0..], hash2[0..]));
+            }
         }
     }
 }
@@ -601,8 +590,8 @@ test "different options produce different hash" {
             },
             Blake3 => {
                 // test keyed vs unkeyed
-                const options1 = getOptionsForTests(H, null);
-                const options2 = getOptionsForTests(H, true);
+                const options1 = HashOptions{ .key = "0123456789abcdef0123456789abcdef" };
+                const options2 = null;
 
                 const hash1 = try stringHash(H, data, options1);
                 const hash2 = try stringHash(H, data, options2);
@@ -610,9 +599,9 @@ test "different options produce different hash" {
                 continue;
             },
             Xxh3_64 => {
-                // test different seeds
-                const options1 = getOptionsForTests(H, null);
-                const options2 = HashOptions{ .seed = 12345 };
+                // test with vs without seed
+                const options1 = HashOptions{ .seed = 12345 };
+                const options2 = null;
 
                 const hash1 = try stringHash(H, data, options1);
                 const hash2 = try stringHash(H, data, options2);
@@ -621,8 +610,8 @@ test "different options produce different hash" {
             },
             else => {
                 // for HMAC algorithms test different keys
-                const options1 = getOptionsForTests(H, null);
-                const options2 = HashOptions{ .key = "different_key" };
+                const options1 = HashOptions{ .key = "some_key" };
+                const options2 = HashOptions{ .key = "another_key" };
 
                 const hash1 = try stringHash(H, data, options1);
                 const hash2 = try stringHash(H, data, options2);
@@ -637,11 +626,13 @@ test "empty input produces deterministic hash" {
     const empty: []const u8 = "";
     inline for (AlgorithmSpecs) |spec| {
         const H = spec.H;
-        const options = getOptionsForTests(H, null);
-        const hash1 = try stringHash(H, empty, options);
-        const hash2 = try stringHash(H, empty, options);
-        // Only check determinism for empty input (no known-good hash comparison).
-        try std.testing.expectEqual(hash1, hash2);
+        const options_array = getOptionsArrayForTests(H);
+        for (options_array) |options| {
+            const hash1 = try stringHash(H, empty, options);
+            const hash2 = try stringHash(H, empty, options);
+            // Only check determinism for empty input (no known-good hash comparison).
+            try std.testing.expectEqual(hash1, hash2);
+        }
     }
 }
 
@@ -663,16 +654,11 @@ test "multi-chunk file (>64KB) hash matches string hash" {
     }
     inline for (AlgorithmSpecs) |spec| {
         const H = spec.H;
-        const options = getOptionsForTests(H, null);
-        const hash1 = try fileHashInDir(H, tmp.dir, sub_path, options);
-        const hash2 = try stringHash(H, data[0..], options);
-        try std.testing.expectEqual(hash1, hash2);
-
-        if (H == Blake3) {
-            const options_keyed = getOptionsForTests(H, true);
-            const hash_keyed_1 = try fileHashInDir(H, tmp.dir, sub_path, options_keyed);
-            const hash_keyed_2 = try stringHash(H, data[0..], options_keyed);
-            try std.testing.expectEqual(hash_keyed_1, hash_keyed_2);
+        const options_array = getOptionsArrayForTests(H);
+        for (options_array) |options| {
+            const hash1 = try fileHashInDir(H, tmp.dir, sub_path, options);
+            const hash2 = try stringHash(H, data[0..], options);
+            try std.testing.expectEqual(hash1, hash2);
         }
     }
 }
@@ -694,38 +680,23 @@ test "Public API produces same hash as direct API" {
     inline for (AlgorithmSpecs) |spec| {
         const H = spec.H;
         const T = spec.tag;
-        const options = getOptionsForTests(H, null);
+        const options_array = getOptionsArrayForTests(H);
+        for (options_array) |options| {
+            var out_buf: [max_digest_length]u8 = undefined;
+            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
 
-        var out_buf: [max_digest_length]u8 = undefined;
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const digest_file = try fileHashInDir(H, tmp.dir, file_name, options);
+            const expected_bytes_file = std.mem.asBytes(&digest_file);
+            const real_path = try tmp.dir.realpath(file_name, &path_buf);
+            const size_file = try fileHashPub(T, real_path, options, out_buf[0..]);
+            const public_bytes_file = out_buf[0..size_file];
+            try std.testing.expectEqualSlices(u8, expected_bytes_file, public_bytes_file);
 
-        const digest_file = try fileHashInDir(H, tmp.dir, file_name, options);
-        const expected_bytes_file = std.mem.asBytes(&digest_file);
-        const real_path = try tmp.dir.realpath(file_name, &path_buf);
-        const size_file = try fileHashPub(T, real_path, options, out_buf[0..]);
-        const public_bytes_file = out_buf[0..size_file];
-        try std.testing.expectEqualSlices(u8, expected_bytes_file, public_bytes_file);
-
-        const digest_str = try stringHash(H, data, options);
-        const expected_bytes_str = std.mem.asBytes(&digest_str);
-        const size_str = try stringHashPub(T, data, options, out_buf[0..]);
-        const public_bytes_str = out_buf[0..size_str];
-        try std.testing.expectEqualSlices(u8, expected_bytes_str, public_bytes_str);
-
-        if (H == Blake3) {
-            const options_keyed = getOptionsForTests(H, true);
-
-            const digest_file_keyed = try fileHashInDir(H, tmp.dir, file_name, options_keyed);
-            const expected_bytes_file_keyed = std.mem.asBytes(&digest_file_keyed);
-            const size_file_keyed = try fileHashPub(T, real_path, options_keyed, out_buf[0..]);
-            const public_bytes_file_keyed = out_buf[0..size_file_keyed];
-            try std.testing.expectEqualSlices(u8, expected_bytes_file_keyed, public_bytes_file_keyed);
-
-            const digest_str_keyed = try stringHash(H, data, options_keyed);
-            const expected_bytes_str_keyed = std.mem.asBytes(&digest_str_keyed);
-            const size_str_keyed = try stringHashPub(T, data, options_keyed, out_buf[0..]);
-            const public_bytes_str_keyed = out_buf[0..size_str_keyed];
-            try std.testing.expectEqualSlices(u8, expected_bytes_str_keyed, public_bytes_str_keyed);
+            const digest_str = try stringHash(H, data, options);
+            const expected_bytes_str = std.mem.asBytes(&digest_str);
+            const size_str = try stringHashPub(T, data, options, out_buf[0..]);
+            const public_bytes_str = out_buf[0..size_str];
+            try std.testing.expectEqualSlices(u8, expected_bytes_str, public_bytes_str);
         }
     }
 }
