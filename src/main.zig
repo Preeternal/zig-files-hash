@@ -48,7 +48,7 @@ fn calculateHashForEverything(path: [:0]const u8) !void {
         const H = spec.H;
         const options_array = getOptionsArrayForTests(H);
         for (options_array, 0..) |options, i| {
-            const h = try fileHash(H, path, options);
+            const h: H.Digest = try fileHash(H, path, options);
             const suffix = if (H == Blake3 and i == 1) "-KEYED" else "";
             std.debug.print("{s}{s} = {x}\n", .{ spec.H.name, suffix, h });
         }
@@ -699,6 +699,18 @@ test "Public API produces same hash as direct API" {
             try std.testing.expectEqualSlices(u8, expected_bytes_str, public_bytes_str);
         }
     }
+}
+
+test "SHA-256 NIST FIPS 180-4 (Secure Hash Standard)" {
+    const abc = "abc";
+    const expected_hex = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    const abc_hash = try stringHash(Sha256, abc, null);
+    try std.testing.expectFmt(expected_hex, "{x}", .{abc_hash});
+
+    const empty_str = "";
+    const expected_empty_hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    const empty_hash = try stringHash(Sha256, empty_str, null);
+    try std.testing.expectFmt(expected_empty_hex, "{x}", .{empty_hash});
 }
 
 // test "simple test" {
