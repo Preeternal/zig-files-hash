@@ -55,20 +55,6 @@ fn calculateHashForEverything(path: [:0]const u8) !void {
     }
 }
 
-// export type THashAlgorithm =
-//     | 'MD5'
-//     | 'SHA-1'
-//     | 'SHA-224'
-//     | 'SHA-256'
-//     | 'SHA-384'
-//     | 'SHA-512'
-//     | 'XXH3-64'
-//     | 'XXH3-128'
-//     | 'BLAKE3';
-// const Hasher = union(enum) { Xxh3_64: Xxh3_64 };
-
-// const HashMode = enum { hash, hmac, keyed };
-
 const HashAlgorithm = enum {
     @"SHA-224",
     @"SHA-256",
@@ -741,14 +727,6 @@ test "RFC 4231 HMAC SHA-256 test vector" {
     try std.testing.expectFmt(expected_hex, "{x}", .{hash});
 }
 
-// test "simple test" {
-//     const gpa = std.testing.allocator;
-//     var list: std.ArrayList(i32) = .empty;
-//     defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-//     try list.append(gpa, 42);
-//     try std.testing.expectEqual(@as(i32, 42), list.pop());
-// }
-
 // test "fuzz example" {
 //     const Context = struct {
 //         fn testOne(context: @This(), input: []const u8) anyerror!void {
@@ -759,3 +737,27 @@ test "RFC 4231 HMAC SHA-256 test vector" {
 //     };
 //     try std.testing.fuzz(Context{}, Context.testOne, .{});
 // }
+
+test "random stress test" {
+    var prng = std.Random.DefaultPrng.init(0xdeadbeef);
+    var random = prng.random();
+
+    var buf: [4096]u8 = undefined;
+
+    for (0..1000) |_| {
+        const len = random.intRangeAtMost(usize, 0, buf.len);
+        random.bytes(buf[0..len]);
+
+        inline for (AlgorithmSpecs) |spec| {
+            const H = spec.H;
+            const options_array = getOptionsArrayForTests(H);
+
+            for (options_array) |options| {
+                const h1 = try stringHash(H, buf[0..len], options);
+                const h2 = try stringHash(H, buf[0..len], options);
+
+                try std.testing.expectEqual(h1, h2);
+            }
+        }
+    }
+}
