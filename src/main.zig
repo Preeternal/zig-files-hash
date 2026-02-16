@@ -49,7 +49,7 @@ fn calculateHashForEverything(path: [:0]const u8) !void {
         const options_array = getOptionsArrayForTests(H);
         for (options_array, 0..) |options, i| {
             const h: H.Digest = try fileHash(H, path, options);
-            const suffix = if (H == Blake3 and i == 1) "-KEYED" else "";
+            const suffix = if (H == Blake3 and i == 1) "-KEYED" else if (H == Xxh3_64 and i == 1) "-SEEDED" else "";
             std.debug.print("{s}{s} = {x}\n", .{ spec.H.name, suffix, h });
         }
     }
@@ -344,7 +344,9 @@ const Sha1 = struct {
         self.inner.update(data);
     }
 
-    pub const Digest = [20]u8;
+    const digest_length = std.crypto.hash.Sha1.digest_length; // 20;
+
+    pub const Digest = [digest_length]u8;
 
     pub fn final(self: *Sha1) Digest {
         var out: Digest = undefined;
@@ -415,7 +417,9 @@ const MD5 = struct {
         self.inner.update(data);
     }
 
-    pub const Digest = [16]u8;
+    const digest_length = std.crypto.hash.Md5.digest_length; // 16;
+
+    pub const Digest = [digest_length]u8;
 
     pub fn final(self: *MD5) Digest {
         var out: Digest = undefined;
@@ -450,7 +454,9 @@ const Blake3 = struct {
 
     pub const name = "BLAKE3";
 
-    inner: std.crypto.hash.Blake3,
+    const Inner = std.crypto.hash.Blake3;
+
+    inner: Inner,
 
     pub fn init(options: ?HashOptions) !Self {
         var opt: std.crypto.hash.Blake3.Options = .{};
@@ -472,10 +478,12 @@ const Blake3 = struct {
         self.inner.update(data);
     }
 
-    pub const Digest = [32]u8;
+    const digest_length = Inner.digest_length;
+
+    pub const Digest = [digest_length]u8;
 
     pub fn final(self: *const Self) Digest {
-        var out: [32]u8 = undefined;
+        var out: Digest = undefined;
         self.inner.final(out[0..]);
         return out;
     }
@@ -489,6 +497,10 @@ fn getOptionsArrayForTests(comptime H: type) []const ?HashOptions {
         },
         HmacSha224, HmacSha256, HmacSha384, HmacSha512, HmacMd5, HmacSha1 => &[1]?HashOptions{
             .{ .key = "my_secret_key" },
+        },
+        Xxh3_64 => &[2]?HashOptions{
+            null,
+            .{ .seed = 12345 },
         },
         else => &[1]?HashOptions{null},
     };
@@ -701,7 +713,7 @@ test "Public API produces same hash as direct API" {
     }
 }
 
-test "SHA-256 NIST FIPS 180-4 (Secure Hash Standard)" {
+test "SHA-256 NIST FIPS 180-4" {
     const abc = "abc";
     const expected_hex = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     const abc_hash = try stringHash(Sha256, abc, null);
@@ -711,6 +723,22 @@ test "SHA-256 NIST FIPS 180-4 (Secure Hash Standard)" {
     const expected_empty_hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     const empty_hash = try stringHash(Sha256, empty_str, null);
     try std.testing.expectFmt(expected_empty_hex, "{x}", .{empty_hash});
+}
+
+test "Blake3 test vector" {
+    const empty_str = "";
+    const expected_hex_xof = "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262e00f03e7b69af26b7faaf09fcd333050338ddfe085b8cc869ca98b206c08243a26f5487789e8f660afe6c99ef9e0c52b92e7393024a80459cf91f476f9ffdbda7001c22e159b402631f277ca96f2defdf1078282314e763699a31c5363165421cce14d";
+    const expected_hex = expected_hex_xof[0 .. std.crypto.hash.Blake3.digest_length * 2];
+    const hash = try stringHash(Blake3, empty_str, null);
+    try std.testing.expectFmt(expected_hex, "{x}", .{hash});
+}
+
+test "RFC 4231 HMAC SHA-256 test vector" {
+    const key = "Jefe";
+    const data = "what do ya want for nothing?";
+    const expected_hex = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843";
+    const hash = try stringHash(HmacSha256, data, .{ .key = key });
+    try std.testing.expectFmt(expected_hex, "{x}", .{hash});
 }
 
 // test "simple test" {
