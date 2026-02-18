@@ -36,10 +36,10 @@ fn run(al: std.mem.Allocator) !void {
     try calculateHashForEverything(path);
 
     var out_buf: [max_digest_length]u8 = undefined;
-    const size = try fileHashPub(HashAlgorithm.BLAKE3, path, null, out_buf[0..]);
+    const size = try fileHash(HashAlgorithm.BLAKE3, path, null, out_buf[0..]);
     std.debug.print("BLAKE3 (public API file input) = {x}\n", .{out_buf[0..size]});
 
-    const size2 = try stringHashPub(HashAlgorithm.BLAKE3, "Hello, world!", null, out_buf[0..]);
+    const size2 = try stringHash(HashAlgorithm.BLAKE3, "Hello, world!", null, out_buf[0..]);
     std.debug.print("BLAKE3 (public API string input) = {x}\n", .{out_buf[0..size2]});
 }
 
@@ -48,7 +48,7 @@ fn calculateHashForEverything(path: [:0]const u8) !void {
         const H = spec.H;
         const options_array = getOptionsArrayForTests(H);
         for (options_array, 0..) |options, i| {
-            const h: H.Digest = try fileHash(H, path, options);
+            const h: H.Digest = try fileHashImpl(H, path, options);
             const suffix = if (H == Blake3 and i == 1) "-KEYED" else if (H == Xxh3_64 and i == 1) "-SEEDED" else "";
             std.debug.print("{s}{s} = {x}\n", .{ spec.H.name, suffix, h });
         }
@@ -177,7 +177,7 @@ fn fileHashInDir(comptime H: type, dir: std.fs.Dir, sub_path: []const u8, option
 }
 
 fn writeFileHash(H: type, path: []const u8, options: ?HashOptions, out: []u8) !usize {
-    const result = try fileHash(H, path, options);
+    const result = try fileHashImpl(H, path, options);
     const result_bytes = std.mem.asBytes(&result);
     if (out.len < result_bytes.len) {
         return Error.BufferTooSmall;
@@ -186,7 +186,7 @@ fn writeFileHash(H: type, path: []const u8, options: ?HashOptions, out: []u8) !u
     return result_bytes.len;
 }
 
-pub fn fileHashPub(al: HashAlgorithm, path: []const u8, options: ?HashOptions, out: []u8) !usize {
+pub fn fileHash(al: HashAlgorithm, path: []const u8, options: ?HashOptions, out: []u8) !usize {
     // std.debug.print("Calculating {s} hash for {s}\n", .{ @tagName(al), path });
     inline for (AlgorithmSpecs) |spec| {
         if (al == spec.tag) {
@@ -197,7 +197,7 @@ pub fn fileHashPub(al: HashAlgorithm, path: []const u8, options: ?HashOptions, o
 }
 
 fn writeStringHash(H: type, data: []const u8, options: ?HashOptions, out: []u8) !usize {
-    const result = try stringHash(H, data, options);
+    const result = try stringHashImpl(H, data, options);
     const result_bytes = std.mem.asBytes(&result);
     if (out.len < result_bytes.len) {
         return Error.BufferTooSmall;
@@ -206,7 +206,7 @@ fn writeStringHash(H: type, data: []const u8, options: ?HashOptions, out: []u8) 
     return result_bytes.len;
 }
 
-pub fn stringHashPub(al: HashAlgorithm, data: []const u8, options: ?HashOptions, out: []u8) !usize {
+pub fn stringHash(al: HashAlgorithm, data: []const u8, options: ?HashOptions, out: []u8) !usize {
     // std.debug.print("Calculating {s} hash for string input\n", .{ @tagName(al) });
     inline for (AlgorithmSpecs) |spec| {
         if (al == spec.tag) {
@@ -216,11 +216,11 @@ pub fn stringHashPub(al: HashAlgorithm, data: []const u8, options: ?HashOptions,
     unreachable;
 }
 
-fn fileHash(comptime H: type, path: []const u8, options: ?HashOptions) !H.Digest {
+fn fileHashImpl(comptime H: type, path: []const u8, options: ?HashOptions) !H.Digest {
     return fileHashInDir(H, std.fs.cwd(), path, options);
 }
 
-fn stringHash(comptime H: type, data: []const u8, options: ?HashOptions) !H.Digest {
+fn stringHashImpl(comptime H: type, data: []const u8, options: ?HashOptions) !H.Digest {
     var hasher = try H.init(options);
     hasher.update(data);
     return hasher.final();
@@ -496,8 +496,8 @@ fn expectDeterministicStringHash(comptime H: type) !void {
     const options_array = getOptionsArrayForTests(H);
     for (options_array) |options| {
         const data = "Hello, world!";
-        const hash1 = try stringHash(H, data, options);
-        const hash2 = try stringHash(H, data, options);
+        const hash1 = try stringHashImpl(H, data, options);
+        const hash2 = try stringHashImpl(H, data, options);
         try std.testing.expectEqual(hash1, hash2);
     }
 }
@@ -530,7 +530,7 @@ fn expectFileHashDeterminismAndConsistency(comptime H: type) !void {
 
         try std.testing.expectEqual(hash1, hash2);
 
-        const hash3 = try stringHash(H, data, options);
+        const hash3 = try stringHashImpl(H, data, options);
         try std.testing.expectEqual(hash1, hash3);
     }
 }
@@ -566,8 +566,8 @@ test "different input produces different hash" {
         const H = spec.H;
         const options_array = getOptionsArrayForTests(H);
         for (options_array) |options| {
-            const hash1 = try stringHash(H, data1, options);
-            const hash2 = try stringHash(H, data2, options);
+            const hash1 = try stringHashImpl(H, data1, options);
+            const hash2 = try stringHashImpl(H, data2, options);
             if (H == Xxh3_64) {
                 try std.testing.expect(hash1 != hash2);
             } else {
@@ -591,8 +591,8 @@ test "different options produce different hash" {
                 const options1 = HashOptions{ .key = "0123456789abcdef0123456789abcdef" };
                 const options2 = null;
 
-                const hash1 = try stringHash(H, data, options1);
-                const hash2 = try stringHash(H, data, options2);
+                const hash1 = try stringHashImpl(H, data, options1);
+                const hash2 = try stringHashImpl(H, data, options2);
                 try std.testing.expect(!std.mem.eql(u8, hash1[0..], hash2[0..]));
                 continue;
             },
@@ -601,8 +601,8 @@ test "different options produce different hash" {
                 const options1 = HashOptions{ .seed = 12345 };
                 const options2 = null;
 
-                const hash1 = try stringHash(H, data, options1);
-                const hash2 = try stringHash(H, data, options2);
+                const hash1 = try stringHashImpl(H, data, options1);
+                const hash2 = try stringHashImpl(H, data, options2);
                 try std.testing.expect(hash1 != hash2);
                 continue;
             },
@@ -611,8 +611,8 @@ test "different options produce different hash" {
                 const options1 = HashOptions{ .key = "some_key" };
                 const options2 = HashOptions{ .key = "another_key" };
 
-                const hash1 = try stringHash(H, data, options1);
-                const hash2 = try stringHash(H, data, options2);
+                const hash1 = try stringHashImpl(H, data, options1);
+                const hash2 = try stringHashImpl(H, data, options2);
                 try std.testing.expect(!std.mem.eql(u8, hash1[0..], hash2[0..]));
                 continue;
             },
@@ -626,8 +626,8 @@ test "empty input produces deterministic hash" {
         const H = spec.H;
         const options_array = getOptionsArrayForTests(H);
         for (options_array) |options| {
-            const hash1 = try stringHash(H, empty, options);
-            const hash2 = try stringHash(H, empty, options);
+            const hash1 = try stringHashImpl(H, empty, options);
+            const hash2 = try stringHashImpl(H, empty, options);
             // Only check determinism for empty input (no known-good hash comparison).
             try std.testing.expectEqual(hash1, hash2);
         }
@@ -655,7 +655,7 @@ test "multi-chunk file (>64KB) hash matches string hash" {
         const options_array = getOptionsArrayForTests(H);
         for (options_array) |options| {
             const hash1 = try fileHashInDir(H, tmp.dir, sub_path, options);
-            const hash2 = try stringHash(H, data[0..], options);
+            const hash2 = try stringHashImpl(H, data[0..], options);
             try std.testing.expectEqual(hash1, hash2);
         }
     }
@@ -686,13 +686,13 @@ test "Public API produces same hash as direct API" {
             const digest_file = try fileHashInDir(H, tmp.dir, file_name, options);
             const expected_bytes_file = std.mem.asBytes(&digest_file);
             const real_path = try tmp.dir.realpath(file_name, &path_buf);
-            const size_file = try fileHashPub(T, real_path, options, out_buf[0..]);
+            const size_file = try fileHash(T, real_path, options, out_buf[0..]);
             const public_bytes_file = out_buf[0..size_file];
             try std.testing.expectEqualSlices(u8, expected_bytes_file, public_bytes_file);
 
-            const digest_str = try stringHash(H, data, options);
+            const digest_str = try stringHashImpl(H, data, options);
             const expected_bytes_str = std.mem.asBytes(&digest_str);
-            const size_str = try stringHashPub(T, data, options, out_buf[0..]);
+            const size_str = try stringHash(T, data, options, out_buf[0..]);
             const public_bytes_str = out_buf[0..size_str];
             try std.testing.expectEqualSlices(u8, expected_bytes_str, public_bytes_str);
         }
@@ -702,12 +702,12 @@ test "Public API produces same hash as direct API" {
 test "SHA-256 NIST FIPS 180-4" {
     const abc = "abc";
     const expected_hex = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
-    const abc_hash = try stringHash(Sha256, abc, null);
+    const abc_hash = try stringHashImpl(Sha256, abc, null);
     try std.testing.expectFmt(expected_hex, "{x}", .{abc_hash});
 
     const empty_str = "";
     const expected_empty_hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-    const empty_hash = try stringHash(Sha256, empty_str, null);
+    const empty_hash = try stringHashImpl(Sha256, empty_str, null);
     try std.testing.expectFmt(expected_empty_hex, "{x}", .{empty_hash});
 }
 
@@ -715,7 +715,7 @@ test "Blake3 test vector" {
     const empty_str = "";
     const expected_hex_xof = "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262e00f03e7b69af26b7faaf09fcd333050338ddfe085b8cc869ca98b206c08243a26f5487789e8f660afe6c99ef9e0c52b92e7393024a80459cf91f476f9ffdbda7001c22e159b402631f277ca96f2defdf1078282314e763699a31c5363165421cce14d";
     const expected_hex = expected_hex_xof[0 .. std.crypto.hash.Blake3.digest_length * 2];
-    const hash = try stringHash(Blake3, empty_str, null);
+    const hash = try stringHashImpl(Blake3, empty_str, null);
     try std.testing.expectFmt(expected_hex, "{x}", .{hash});
 }
 
@@ -723,7 +723,7 @@ test "RFC 4231 HMAC SHA-256 test vector" {
     const key = "Jefe";
     const data = "what do ya want for nothing?";
     const expected_hex = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843";
-    const hash = try stringHash(HmacSha256, data, .{ .key = key });
+    const hash = try stringHashImpl(HmacSha256, data, .{ .key = key });
     try std.testing.expectFmt(expected_hex, "{x}", .{hash});
 }
 
@@ -753,8 +753,8 @@ test "random stress test" {
             const options_array = getOptionsArrayForTests(H);
 
             for (options_array) |options| {
-                const h1 = try stringHash(H, buf[0..len], options);
-                const h2 = try stringHash(H, buf[0..len], options);
+                const h1 = try stringHashImpl(H, buf[0..len], options);
+                const h2 = try stringHashImpl(H, buf[0..len], options);
 
                 try std.testing.expectEqual(h1, h2);
             }
