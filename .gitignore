@@ -6,3 +6,5 @@ zig-out/
 .vscode/
 # Copilot Instructions
 .github/copilot-instructions.md
+
+some.zig
