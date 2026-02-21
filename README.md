@@ -4,7 +4,7 @@ Small hashing library in Zig with one runtime API for multiple algorithms.
 
 ## Status
 
-- `v0.x` API: may change.
+- Pre-1.0 API may change.
 - Minimum Zig version: `0.15.2` (`build.zig.zon`).
 
 ## Features
