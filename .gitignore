@@ -7,4 +7,5 @@ zig-out/
 # Copilot Instructions
 .github/copilot-instructions.md
 
+notes.md
 some.zig
