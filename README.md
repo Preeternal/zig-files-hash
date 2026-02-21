@@ -15,6 +15,24 @@ Small hashing library in Zig with one runtime API for multiple algorithms.
 - Keyed/seeded modes where applicable
 - Cross-platform Zig build
 
+## Installation
+
+Add dependency to your Zig project:
+
+```bash
+zig fetch --save https://github.com/Preeternal/zig-files-hash/archive/refs/tags/v<VERSION>.tar.gz
+```
+
+Then wire module import in your `build.zig`:
+
+```zig
+const zfh_dep = b.dependency("zig_files_hash", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("zig_files_hash", zfh_dep.module("zig_files_hash"));
+```
+
 ## Public API
 
 ```zig
@@ -85,6 +103,16 @@ Rules:
 - `XXH3-64`: optional `seed`
 - SHA/MD5 algorithms ignore options
 - If `out` is too small: `error.BufferTooSmall`
+
+## Error Handling
+
+`stringHash` can return:
+
+- `error.BufferTooSmall`
+- `error.KeyRequired`
+- `error.InvalidKeyLength`
+
+`fileHash` can return all errors above, plus file system / OS errors from opening and reading files (for example: `error.FileNotFound`, `error.AccessDenied`, `error.IsDir`, `error.NotDir`, `error.NameTooLong`, `error.Unexpected`; exact set is platform-dependent).
 
 ## Output Format
 

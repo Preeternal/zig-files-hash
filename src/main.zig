@@ -11,7 +11,7 @@ const getDemoOptionsArray = zig_files_hash.getDemoOptionsArray;
 pub fn main() !void {
     std.debug.print("Running in {s} mode\n", .{@tagName(builtin_mode)});
 
-    if (builtin_mode == .Debug) { // TODO: comment this condition before building release and use page_allocator for all modes
+    if (builtin_mode == .Debug) {
         var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
         defer std.debug.assert(gpa.deinit() == .ok);
 
