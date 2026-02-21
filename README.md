@@ -143,14 +143,16 @@ pub fn main() !void {
 ```zig
 const std = @import("std");
 const zfh = @import("zig_files_hash");
+const HashAlgorithm = zfh.HashAlgorithm;
 
 pub fn main() !void {
+    const path: []const u8 = "file.bin";
     var out: [zfh.max_digest_length]u8 = undefined;
     const options = zfh.HashOptions{
         .key = "0123456789abcdef0123456789abcdef",
     };
 
-    const len = try zfh.fileHash(.BLAKE3, "file.bin", options, out[0..]);
+    const len = try zfh.fileHash(HashAlgorithm.BLAKE3, path, options,out_buf[0..]);
     std.debug.print("BLAKE3 = {x}\n", .{out[0..len]});
 }
 ```
