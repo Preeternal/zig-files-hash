@@ -7,6 +7,7 @@ pub const HashAlgorithm = algorithms.HashAlgorithm;
 pub const HashOptions = algorithms.HashOptions;
 pub const Error = algorithms.Error;
 pub const max_digest_length = algorithms.max_digest_length;
+pub const digestLength = algorithms.digestLength;
 
 pub const fileHash = dispatch.fileHash;
 pub const stringHash = dispatch.stringHash;

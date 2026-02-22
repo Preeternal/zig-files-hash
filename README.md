@@ -1,6 +1,6 @@
 # zig-files-hash
 
-Small hashing library in Zig with one runtime API for multiple algorithms.
+Small, allocation-free hashing library in Zig with a unified runtime API and an optional C ABI.
 
 ## Status
 
@@ -11,9 +11,9 @@ Small hashing library in Zig with one runtime API for multiple algorithms.
 
 - Unified runtime API via `HashAlgorithm`
 - Hashing for in-memory data and files
-- Allocation-free core API (caller provides output buffer)
+- Allocation-free core API (caller-managed output buffer)
+- Optional C ABI for native/FFI integrations
 - Keyed/seeded modes where applicable
-- Cross-platform Zig build
 
 ## Installation
 
@@ -33,13 +33,15 @@ const zfh_dep = b.dependency("zig_files_hash", .{
 exe.root_module.addImport("zig_files_hash", zfh_dep.module("zig_files_hash"));
 ```
 
-## Public API
+## Zig API
 
 ```zig
 pub const HashAlgorithm
 pub const HashOptions
 pub const Error
 pub const max_digest_length
+
+pub fn digestLength(alg: HashAlgorithm) usize
 
 pub fn stringHash(
     alg: HashAlgorithm,
@@ -58,7 +60,7 @@ pub fn fileHash(
 
 Return value is digest length in bytes. Digest bytes are written to `out[0..len]`.
 
-## Algorithms
+### Algorithms
 
 ```zig
 pub const HashAlgorithm = enum {
@@ -81,7 +83,7 @@ pub const HashAlgorithm = enum {
 };
 ```
 
-## Options and Errors
+### Options and errors
 
 ```zig
 pub const HashOptions = struct {
@@ -104,20 +106,84 @@ Rules:
 - SHA/MD5 algorithms ignore options
 - If `out` is too small: `error.BufferTooSmall`
 
-## Error Handling
+`stringHash` returns only library errors above.
 
-`stringHash` can return:
+`fileHash` returns library errors plus filesystem/OS errors from opening and reading files (for example: `error.FileNotFound`, `error.AccessDenied`, `error.IsDir`, `error.NotDir`, `error.NameTooLong`, `error.Unexpected`; exact set is platform-dependent).
 
-- `error.BufferTooSmall`
-- `error.KeyRequired`
-- `error.InvalidKeyLength`
+## C ABI
 
-`fileHash` can return all errors above, plus file system / OS errors from opening and reading files (for example: `error.FileNotFound`, `error.AccessDenied`, `error.IsDir`, `error.NotDir`, `error.NameTooLong`, `error.Unexpected`; exact set is platform-dependent).
+The C ABI lives in `src/c_api.zig`, with header `src/zig_files_hash_c_api.h`.
 
-## Output Format
+Build artifacts:
+
+```bash
+zig build c-api-static   # .a / .lib
+zig build c-api-shared   # .dylib / .so / .dll
+zig build c-api-header   # installs header to zig-out/include
+zig build c-api          # all of the above
+```
+
+Installed outputs:
+
+- `zig-out/lib/libzig_files_hash_c_api_static.a` (or `.lib`)
+- `zig-out/lib/libzig_files_hash_c_api.dylib` / `.so` / `.dll`
+- `zig-out/include/zig_files_hash_c_api.h`
+
+Main C functions:
+
+```c
+size_t zfh_max_digest_length(void);
+uint32_t zfh_api_version(void);
+zfh_error zfh_digest_length(zfh_algorithm alg, size_t *out_len_ptr);
+const char *zfh_error_message(zfh_error code);
+zfh_error zfh_string_hash(...);
+zfh_error zfh_file_hash(...);
+```
+
+`zfh_api_version()` returns the same value as `ZFH_API_VERSION`.
+
+C options:
+
+```c
+typedef struct zfh_options {
+    uint32_t struct_size; // set to sizeof(zfh_options)
+    uint32_t flags;
+    uint64_t seed;
+    const uint8_t *key_ptr;
+    size_t key_len;
+} zfh_options;
+```
+
+Use flags:
+
+- `ZFH_OPTION_HAS_SEED`
+- `ZFH_OPTION_HAS_KEY`
+
+If no options are needed, pass `NULL` for `options_ptr`.
+If options are provided, set `struct_size = sizeof(zfh_options)` (or `ZFH_OPTIONS_STRUCT_SIZE`).
+If `ZFH_OPTION_HAS_KEY` is set with `key_len == 0`, an empty key is passed through.
+This is valid for HMAC algorithms. For `BLAKE3` keyed mode, empty key returns `ZFH_INVALID_KEY_LENGTH`.
+For `zfh_digest_length` / `zfh_string_hash` / `zfh_file_hash`, output length pointers are set to `0` on error.
+`zfh_file_hash` takes `path_ptr + path_len`; null-terminated C strings are not required.
+
+C error model:
+
+- `ZFH_OK`
+- `ZFH_INVALID_ARGUMENT`
+- `ZFH_INVALID_ALGORITHM`
+- `ZFH_BUFFER_TOO_SMALL`
+- `ZFH_KEY_REQUIRED`
+- `ZFH_INVALID_KEY_LENGTH`
+- `ZFH_FILE_NOT_FOUND`
+- `ZFH_ACCESS_DENIED`
+- `ZFH_INVALID_PATH`
+- `ZFH_IO_ERROR`
+- `ZFH_UNKNOWN_ERROR`
+
+## Output format
 
 - API returns raw digest bytes, not hex string.
-- Print hex with `{x}`.
+- Print hex with `{x}` in Zig or your own hex encoder in C.
 - `XXH3-64` bytes are written in canonical big-endian order.
 - `XXH3-64` is non-cryptographic (fast checksum/hash, not for security).
 
@@ -132,9 +198,7 @@ const zfh = @import("zig_files_hash");
 pub fn main() !void {
     var out: [zfh.max_digest_length]u8 = undefined;
     const len = try zfh.stringHash(.@"SHA-256", "hello world", null, out[0..]);
-    const digest = out[0..len];
-
-    std.debug.print("SHA-256 = {x}\n", .{digest});
+    std.debug.print("SHA-256 = {x}\n", .{out[0..len]});
 }
 ```
 
@@ -152,12 +216,12 @@ pub fn main() !void {
         .key = "0123456789abcdef0123456789abcdef",
     };
 
-    const len = try zfh.fileHash(HashAlgorithm.BLAKE3, path, options,out_buf[0..]);
+    const len = try zfh.fileHash(HashAlgorithm.BLAKE3, path, options, out[0..]);
     std.debug.print("BLAKE3 = {x}\n", .{out[0..len]});
 }
 ```
 
-## Build and Test
+## Build and test
 
 ```bash
 zig build
@@ -170,6 +234,4 @@ zig build test
 
 ## License
 
-MIT
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).

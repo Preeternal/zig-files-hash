@@ -104,6 +104,15 @@ pub const max_digest_length = blk: {
     break :blk max;
 };
 
+pub fn digestLength(alg: HashAlgorithm) usize {
+    inline for (AlgorithmSpecs) |spec| {
+        if (alg == spec.tag) {
+            return digestLengthBytes(spec.H);
+        }
+    }
+    unreachable;
+}
+
 fn Sha2_32(comptime Bits: u16) type {
     return struct {
         const Self = @This();

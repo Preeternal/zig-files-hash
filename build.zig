@@ -41,6 +41,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const c_api_mod = b.createModule(.{
+        .root_source_file = b.path("src/c_api.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
     // to the module defined above, it's sometimes preferable to split business
@@ -88,6 +94,48 @@ pub fn build(b: *std.Build) void {
     // step). By default the install prefix is `zig-out/` but can be overridden
     // by passing `--prefix` or `-p`.
     b.installArtifact(exe);
+
+    // C ABI static library (.a / .lib)
+    const c_api_static = b.addLibrary(.{
+        .name = "zig_files_hash_c_api_static",
+        .linkage = .static,
+        .root_module = c_api_mod,
+    });
+
+    // C ABI shared library (.dylib / .so / .dll)
+    const c_api_shared = b.addLibrary(.{
+        .name = "zig_files_hash_c_api",
+        .linkage = .dynamic,
+        .root_module = c_api_mod,
+    });
+
+    const install_c_api_static = b.addInstallArtifact(c_api_static, .{
+        .h_dir = .disabled,
+    });
+    const install_c_api_shared = b.addInstallArtifact(c_api_shared, .{
+        .h_dir = .disabled,
+    });
+
+    // NOTE: Zig 0.15.2 currently does not reliably emit .h for this library
+    // with -femit-h in this setup, so we install the maintained C header file.
+    const install_c_api_header = b.addInstallHeaderFile(
+        b.path("src/zig_files_hash_c_api.h"),
+        "zig_files_hash_c_api.h",
+    );
+
+    const c_api_static_step = b.step("c-api-static", "Build C ABI static library");
+    c_api_static_step.dependOn(&install_c_api_static.step);
+
+    const c_api_shared_step = b.step("c-api-shared", "Build C ABI shared library");
+    c_api_shared_step.dependOn(&install_c_api_shared.step);
+
+    const c_api_header_step = b.step("c-api-header", "Install C ABI header");
+    c_api_header_step.dependOn(&install_c_api_header.step);
+
+    const c_api_step = b.step("c-api", "Build C ABI artifacts (static/shared/header)");
+    c_api_step.dependOn(&install_c_api_static.step);
+    c_api_step.dependOn(&install_c_api_shared.step);
+    c_api_step.dependOn(&install_c_api_header.step);
 
     // This creates a top level step. Top level steps have a name and can be
     // invoked by name when running `zig build` (e.g. `zig build run`).
