@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define ZFH_API_VERSION 1u
+#define ZFH_API_VERSION 2u
 
 #ifdef __cplusplus
 extern "C" {
@@ -106,6 +106,46 @@ zfh_error zfh_file_hash(
     const uint8_t* path_ptr,
     size_t path_len,
     const zfh_options* options_ptr,
+    uint8_t* out_ptr,
+    size_t out_len,
+    size_t* written_len_ptr
+);
+
+/* Size/alignment requirements for caller-provided streaming state buffer. */
+size_t zfh_hasher_state_size(void);
+size_t zfh_hasher_state_align(void);
+
+/* Initializes hasher state in caller-provided memory.
+ * state_ptr must be aligned to zfh_hasher_state_align() and state_len must be
+ * >= zfh_hasher_state_size().
+ */
+zfh_error zfh_hasher_init_inplace(
+    zfh_algorithm alg,
+    const zfh_options* options_ptr,
+    void* state_ptr,
+    size_t state_len
+);
+
+/* Feeds a chunk into the hasher.
+ * data_ptr may be NULL only when data_len == 0.
+ * Returns ZFH_INVALID_ARGUMENT if state is not initialized or was already finalized.
+ */
+zfh_error zfh_hasher_update(
+    void* state_ptr,
+    size_t state_len,
+    const uint8_t* data_ptr,
+    size_t data_len
+);
+
+/* Finalizes digest into out_ptr.
+ * On success, writes digest bytes to out_ptr and length to *written_len_ptr.
+ * On error, writes 0 to *written_len_ptr and returns a non-zero zfh_error.
+ * Must be called at most once for a given initialized state.
+ * Repeated calls return ZFH_INVALID_ARGUMENT.
+ */
+zfh_error zfh_hasher_final(
+    void* state_ptr,
+    size_t state_len,
     uint8_t* out_ptr,
     size_t out_len,
     size_t* written_len_ptr

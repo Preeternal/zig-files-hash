@@ -2,75 +2,40 @@ const std = @import("std");
 const algorithms = @import("algorithms.zig");
 
 const HashAlgorithm = algorithms.HashAlgorithm;
-const AlgorithmSpecs = algorithms.AlgorithmSpecs;
+const RuntimeHasher = algorithms.RuntimeHasher;
+
+const runtime_hasher_union_fields = algorithms.runtime_hasher_union_fields;
 
 const HashOptions = algorithms.HashOptions;
 const Error = algorithms.Error;
 const max_digest_length = algorithms.max_digest_length;
 
-fn fileHashInDir(comptime H: type, dir: std.fs.Dir, sub_path: []const u8, options: ?HashOptions) !H.Digest {
+pub fn fileHashInDir(alg: HashAlgorithm, dir: std.fs.Dir, sub_path: []const u8, options: ?HashOptions, out: []u8) !usize {
     var file = try dir.openFile(sub_path, .{});
     defer file.close();
-    var buf: [64 * 1024]u8 = undefined;
-    var hasher = try H.init(options);
 
+    var hasher = try RuntimeHasher.init(alg, options);
+
+    var buf: [64 * 1024]u8 = undefined;
     while (true) {
         const n = try file.read(buf[0..]);
-        if (n == 0) {
-            return hasher.final();
-        }
+        if (n == 0) break;
 
         const chunk = buf[0..n];
         hasher.update(chunk);
     }
-}
 
-fn writeFileHash(H: type, path: []const u8, options: ?HashOptions, out: []u8) !usize {
-    const result = try fileHashImpl(H, path, options);
-    if (out.len < result.len) {
-        return Error.BufferTooSmall;
-    }
-    @memcpy(out[0..result.len], result[0..]);
-    return result.len;
+    return hasher.final(out);
 }
 
 pub fn fileHash(alg: HashAlgorithm, path: []const u8, options: ?HashOptions, out: []u8) !usize {
-    // std.debug.print("Calculating {s} hash for {s}\n", .{ @tagName(alg), path });
-    inline for (AlgorithmSpecs) |spec| {
-        if (alg == spec.tag) {
-            return writeFileHash(spec.H, path, options, out);
-        }
-    }
-    unreachable;
-}
-
-fn writeStringHash(H: type, data: []const u8, options: ?HashOptions, out: []u8) !usize {
-    const result = try stringHashImpl(H, data, options);
-    if (out.len < result.len) {
-        return Error.BufferTooSmall;
-    }
-    @memcpy(out[0..result.len], result[0..]);
-    return result.len;
+    return fileHashInDir(alg, std.fs.cwd(), path, options, out);
 }
 
 pub fn stringHash(alg: HashAlgorithm, data: []const u8, options: ?HashOptions, out: []u8) !usize {
-    // std.debug.print("Calculating {s} hash for string input\n", .{ @tagName(alg) });
-    inline for (AlgorithmSpecs) |spec| {
-        if (alg == spec.tag) {
-            return writeStringHash(spec.H, data, options, out);
-        }
-    }
-    unreachable;
-}
-
-fn fileHashImpl(comptime H: type, path: []const u8, options: ?HashOptions) !H.Digest {
-    return fileHashInDir(H, std.fs.cwd(), path, options);
-}
-
-fn stringHashImpl(comptime H: type, data: []const u8, options: ?HashOptions) !H.Digest {
-    var hasher = try H.init(options);
+    var hasher = try RuntimeHasher.init(alg, options);
     hasher.update(data);
-    return hasher.final();
+    return hasher.final(out);
 }
 
 pub fn getDemoOptionsArray(alg: HashAlgorithm) []const ?HashOptions {
@@ -114,8 +79,8 @@ fn expectDeterministicStringHash(alg: HashAlgorithm) !void {
 }
 
 test "deterministic string hash" {
-    inline for (AlgorithmSpecs) |spec| {
-        const alg = spec.tag;
+    inline for (runtime_hasher_union_fields) |field| {
+        const alg = @field(HashAlgorithm, field.name);
         try expectDeterministicStringHash(alg);
     }
 }
@@ -158,8 +123,8 @@ fn expectFileHashDeterminismAndConsistency(alg: HashAlgorithm) !void {
 }
 
 test "file hash determinism and consistency with string hash" {
-    inline for (AlgorithmSpecs) |spec| {
-        const alg = spec.tag;
+    inline for (runtime_hasher_union_fields) |field| {
+        const alg = @field(HashAlgorithm, field.name);
         try expectFileHashDeterminismAndConsistency(alg);
     }
 }
@@ -167,8 +132,8 @@ test "file hash determinism and consistency with string hash" {
 test "different input produces different hash" {
     const data1 = "Hello, world!";
     const data2 = "Hello, world?";
-    inline for (AlgorithmSpecs) |spec| {
-        const alg = spec.tag;
+    inline for (runtime_hasher_union_fields) |field| {
+        const alg = @field(HashAlgorithm, field.name);
         const options_array = getDemoOptionsArray(alg);
         for (options_array) |options| {
             var out_buf1: [max_digest_length]u8 = undefined;
@@ -186,8 +151,8 @@ test "different input produces different hash" {
 
 test "different options produce different hash" {
     const data = "Hello, world!";
-    inline for (AlgorithmSpecs) |spec| {
-        const alg = spec.tag;
+    inline for (runtime_hasher_union_fields) |field| {
+        const alg = @field(HashAlgorithm, field.name);
         switch (alg) {
             HashAlgorithm.@"SHA-224", //
             HashAlgorithm.@"SHA-256",
@@ -257,8 +222,8 @@ test "different options produce different hash" {
 
 test "empty input produces deterministic hash" {
     const empty: []const u8 = "";
-    inline for (AlgorithmSpecs) |spec| {
-        const alg = spec.tag;
+    inline for (runtime_hasher_union_fields) |field| {
+        const alg = @field(HashAlgorithm, field.name);
         const options_array = getDemoOptionsArray(alg);
         for (options_array) |options| {
             var out_buf1: [max_digest_length]u8 = undefined;
@@ -292,14 +257,17 @@ test "multi-chunk file (>64KB) hash matches string hash" {
         defer file.close();
         try file.writeAll(data[0..]);
     }
-    inline for (AlgorithmSpecs) |spec| {
-        const alg = spec.tag;
-        const H = spec.H;
+    inline for (runtime_hasher_union_fields) |field| {
+        const alg = @field(HashAlgorithm, field.name);
         const options_array = getDemoOptionsArray(alg);
         for (options_array) |options| {
-            const hash1 = try fileHashInDir(H, tmp.dir, sub_path, options);
-            const hash2 = try stringHashImpl(H, data[0..], options);
-            try std.testing.expectEqual(hash1, hash2);
+            var out_buf_file: [max_digest_length]u8 = undefined;
+            const out_len_file = try fileHashInDir(alg, tmp.dir, sub_path, options, out_buf_file[0..]);
+            const hash1 = out_buf_file[0..out_len_file];
+            var out_buf_str: [max_digest_length]u8 = undefined;
+            const out_len_str = try stringHash(alg, data[0..], options, out_buf_str[0..]);
+            const hash2 = out_buf_str[0..out_len_str];
+            try std.testing.expectEqualSlices(u8, hash1, hash2);
         }
     }
 }
@@ -318,13 +286,13 @@ test "Public API produces same hash as direct API" {
         try file.writeAll(data);
     }
 
-    inline for (AlgorithmSpecs) |spec| {
-        const H = spec.H;
-        const alg = spec.tag;
+    inline for (runtime_hasher_union_fields) |field| {
+        const alg = @field(HashAlgorithm, field.name);
         const options_array = getDemoOptionsArray(alg);
         for (options_array) |options| {
-            const digest_file = try fileHashInDir(H, tmp.dir, file_name, options);
-            const expected_bytes_file = std.mem.asBytes(&digest_file);
+            var out_buf_dir_file: [max_digest_length]u8 = undefined;
+            const size_dir_file = try fileHashInDir(alg, tmp.dir, file_name, options, out_buf_dir_file[0..]);
+            const dir_bytes = out_buf_dir_file[0..size_dir_file];
 
             var out_buf_file: [max_digest_length]u8 = undefined;
             var path_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -332,14 +300,24 @@ test "Public API produces same hash as direct API" {
             const size_file = try fileHash(alg, real_path, options, out_buf_file[0..]);
             const public_bytes_file = out_buf_file[0..size_file];
 
-            try std.testing.expectEqualSlices(u8, expected_bytes_file, public_bytes_file);
+            try std.testing.expectEqualSlices(u8, dir_bytes, public_bytes_file);
 
-            const digest_str = try stringHashImpl(H, data, options);
-            const expected_bytes_str = std.mem.asBytes(&digest_str);
-            var out_buf_str: [max_digest_length]u8 = undefined;
-            const size_str = try stringHash(alg, data, options, out_buf_str[0..]);
-            const public_bytes_str = out_buf_str[0..size_str];
-            try std.testing.expectEqualSlices(u8, expected_bytes_str, public_bytes_str);
+            var file = try tmp.dir.openFile(file_name, .{});
+            defer file.close();
+
+            var hasher = try RuntimeHasher.init(alg, options);
+            var buf: [64 * 1024]u8 = undefined;
+            while (true) {
+                const n = try file.read(buf[0..]);
+                if (n == 0) break;
+
+                const chunk = buf[0..n];
+                hasher.update(chunk);
+            }
+
+            const digest = hasher.finalResult();
+            const bytes = digest.slice();
+            try std.testing.expectEqualSlices(u8, dir_bytes, bytes);
         }
     }
 }
@@ -406,16 +384,20 @@ test "random stress test" {
         const len = random.intRangeAtMost(usize, 0, buf.len);
         random.bytes(buf[0..len]);
 
-        inline for (AlgorithmSpecs) |spec| {
-            const H = spec.H;
-            const alg = spec.tag;
+        inline for (runtime_hasher_union_fields) |field| {
+            const alg = @field(HashAlgorithm, field.name);
             const options_array = getDemoOptionsArray(alg);
 
             for (options_array) |options| {
-                const h1 = try stringHashImpl(H, buf[0..len], options);
-                const h2 = try stringHashImpl(H, buf[0..len], options);
+                var out_buf1: [max_digest_length]u8 = undefined;
+                const size1 = try stringHash(alg, buf[0..len], options, out_buf1[0..]);
+                const h1 = out_buf1[0..size1];
 
-                try std.testing.expectEqual(h1, h2);
+                var out_buf2: [max_digest_length]u8 = undefined;
+                const size2 = try stringHash(alg, buf[0..len], options, out_buf2[0..]);
+                const h2 = out_buf2[0..size2];
+
+                try std.testing.expectEqualSlices(u8, h1, h2);
             }
         }
     }

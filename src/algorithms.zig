@@ -1,12 +1,8 @@
 const std = @import("std");
 
 pub const HashOptions = struct {
-    // mode: HashMode = .hash,
     seed: ?u64 = null,
-    // Blake3 key size 32 ([32]u8),
-    // Sha2_32 key size varies depending on variant ([?]u8)
     key: ?[]const u8 = null,
-    // key_encoding: ?KeyEncoding = null,
 };
 
 pub const Error = error{
@@ -34,53 +30,110 @@ pub const HashAlgorithm = enum {
     @"HMAC-SHA-1",
 };
 
-const AlgorithmSpec = struct {
-    tag: HashAlgorithm,
-    H: type,
+pub const RuntimeHasher = union(HashAlgorithm) {
+    @"SHA-224": Sha224,
+    @"SHA-256": Sha256,
+    @"SHA-384": Sha384,
+    @"SHA-512": Sha512,
+    @"SHA-512/224": Sha512_224,
+    @"SHA-512/256": Sha512_256,
+    MD5: MD5,
+    @"SHA-1": Sha1,
+    @"XXH3-64": Xxh3_64,
+    BLAKE3: Blake3,
+    @"HMAC-SHA-224": HmacSha224,
+    @"HMAC-SHA-256": HmacSha256,
+    @"HMAC-SHA-384": HmacSha384,
+    @"HMAC-SHA-512": HmacSha512,
+    @"HMAC-MD5": HmacMd5,
+    @"HMAC-SHA-1": HmacSha1,
+
+    pub fn init(alg: HashAlgorithm, options: ?HashOptions) !RuntimeHasher {
+        const fields = @typeInfo(RuntimeHasher).@"union".fields;
+
+        inline for (fields) |field| {
+            const tag = @field(HashAlgorithm, field.name);
+
+            if (alg == tag) {
+                const H = field.type;
+                const hasher = try H.init(options);
+                return @unionInit(RuntimeHasher, field.name, hasher);
+            }
+        }
+
+        unreachable;
+    }
+
+    pub fn update(self: *RuntimeHasher, chunk: []const u8) void {
+        switch (self.*) {
+            inline else => |*h| h.update(chunk),
+        }
+    }
+
+    pub fn digestLength(self: *const RuntimeHasher) usize {
+        return switch (self.*) {
+            inline else => |*h| digestLengthBytes(@TypeOf(h.*)),
+        };
+    }
+
+    pub fn final(self: *RuntimeHasher, out: []u8) !usize {
+        switch (self.*) {
+            inline else => |*h| {
+                const result = h.final();
+                if (out.len < result.len) return Error.BufferTooSmall;
+                @memcpy(out[0..result.len], result[0..]);
+                return result.len;
+            },
+        }
+    }
+
+    pub const Digest = struct {
+        len: u8,
+        bytes: [max_digest_length]u8,
+
+        pub fn slice(self: *const Digest) []const u8 {
+            return self.bytes[0..self.len];
+        }
+    };
+
+    pub fn finalResult(self: *RuntimeHasher) Digest {
+        switch (self.*) {
+            inline else => |*h| {
+                const result = h.final();
+                var digest: Digest = .{ .len = @intCast(result.len), .bytes = undefined };
+                @memcpy(digest.bytes[0..result.len], result[0..]);
+                return digest;
+            },
+        }
+    }
 };
 
-pub const AlgorithmSpecs = [_]AlgorithmSpec{
-    .{ .tag = .@"SHA-224", .H = Sha224 },
-    .{ .tag = .@"SHA-256", .H = Sha256 },
-    .{ .tag = .@"SHA-384", .H = Sha384 },
-    .{ .tag = .@"SHA-512", .H = Sha512 },
-    .{ .tag = .@"SHA-512/224", .H = Sha512_224 },
-    .{ .tag = .@"SHA-512/256", .H = Sha512_256 },
-    .{ .tag = .MD5, .H = MD5 },
-    .{ .tag = .@"SHA-1", .H = Sha1 },
-    .{ .tag = .@"XXH3-64", .H = Xxh3_64 },
-    .{ .tag = .BLAKE3, .H = Blake3 },
-    .{ .tag = .@"HMAC-SHA-224", .H = HmacSha224 },
-    .{ .tag = .@"HMAC-SHA-256", .H = HmacSha256 },
-    .{ .tag = .@"HMAC-SHA-384", .H = HmacSha384 },
-    .{ .tag = .@"HMAC-SHA-512", .H = HmacSha512 },
-    .{ .tag = .@"HMAC-MD5", .H = HmacMd5 },
-    .{ .tag = .@"HMAC-SHA-1", .H = HmacSha1 },
-};
+const hash_algorithm_enum_fields = @typeInfo(HashAlgorithm).@"enum".fields;
+pub const runtime_hasher_union_fields = @typeInfo(RuntimeHasher).@"union".fields;
 
 comptime {
-    const enum_fields = @typeInfo(HashAlgorithm).@"enum".fields;
-    if (AlgorithmSpecs.len != enum_fields.len) {
-        @compileError("AlgorithmSpecs.len must match HashAlgorithm enum size");
+    if (hash_algorithm_enum_fields.len != runtime_hasher_union_fields.len) {
+        @compileError("RuntimeHasher variants must match HashAlgorithm enum size");
     }
 }
 
 comptime {
-    const enum_fields = @typeInfo(HashAlgorithm).@"enum".fields;
+    var seen: [hash_algorithm_enum_fields.len]bool = .{false} ** hash_algorithm_enum_fields.len;
 
-    var seen: [enum_fields.len]bool = .{false} ** enum_fields.len;
+    for (runtime_hasher_union_fields) |field| {
+        const tag = @field(HashAlgorithm, field.name);
+        const idx = @intFromEnum(tag);
 
-    for (AlgorithmSpecs) |spec| {
-        const idx = @intFromEnum(@as(HashAlgorithm, spec.tag));
         if (seen[idx]) {
-            @compileError("Duplicate tag in AlgorithmSpecs: " ++ @tagName(spec.tag));
+            @compileError("Duplicate tag in RuntimeHasher: " ++ field.name);
         }
+
         seen[idx] = true;
     }
 
     for (seen, 0..) |ok, i| {
         if (!ok) {
-            @compileError("Missing spec for HashAlgorithm: " ++ enum_fields[i].name);
+            @compileError("Missing RuntimeHasher variant for HashAlgorithm: " ++ hash_algorithm_enum_fields[i].name);
         }
     }
 }
@@ -94,20 +147,31 @@ fn digestLengthBytes(comptime H: type) usize {
 }
 
 pub const max_digest_length = blk: {
-    var max = 0;
-    for (AlgorithmSpecs) |spec| {
-        const len = digestLengthBytes(spec.H);
+    var max: usize = 0;
+
+    for (runtime_hasher_union_fields) |field| {
+        const H = field.type;
+        const len = digestLengthBytes(H);
         if (len > max) {
             max = len;
         }
     }
+
     break :blk max;
 };
 
+comptime {
+    if (max_digest_length > std.math.maxInt(u8)) {
+        @compileError("RuntimeHasher.Digest.len is u8; max_digest_length must fit into u8");
+    }
+}
+
 pub fn digestLength(alg: HashAlgorithm) usize {
-    inline for (AlgorithmSpecs) |spec| {
-        if (alg == spec.tag) {
-            return digestLengthBytes(spec.H);
+    inline for (runtime_hasher_union_fields) |field| {
+        const H = field.type;
+        const tag = @field(HashAlgorithm, field.name);
+        if (alg == tag) {
+            return digestLengthBytes(H);
         }
     }
     unreachable;
@@ -277,8 +341,8 @@ const HmacMd5 = Hmac(std.crypto.auth.hmac.HmacMd5);
 const HmacSha1 = Hmac(std.crypto.auth.hmac.HmacSha1);
 
 test "key is required for HMAC algorithms" {
-    inline for (AlgorithmSpecs) |spec| {
-        const H = spec.H;
+    inline for (runtime_hasher_union_fields) |field| {
+        const H = field.type;
         switch (H) {
             HmacSha224, HmacSha256, HmacSha384, HmacSha512, HmacMd5, HmacSha1 => {
                 try std.testing.expectError(Error.KeyRequired, H.init(null));
@@ -380,4 +444,22 @@ const Blake3 = struct {
 test "Blake3 rejects key with invalid length" {
     const options = HashOptions{ .key = "short_key" };
     try std.testing.expectError(Error.InvalidKeyLength, Blake3.init(options));
+}
+
+test "RuntimeHasher.digestLength matches digest size for each algorithm" {
+    inline for (runtime_hasher_union_fields) |field| {
+        const H = field.type;
+        const alg = @field(HashAlgorithm, field.name);
+        const expected_len = digestLengthBytes(H);
+
+        const options: ?HashOptions = switch (H) {
+            HmacSha224, HmacSha256, HmacSha384, HmacSha512, HmacMd5, HmacSha1 => .{
+                .key = "my_secret_key",
+            },
+            else => null,
+        };
+
+        var hasher = try RuntimeHasher.init(alg, options);
+        try std.testing.expectEqual(expected_len, hasher.digestLength());
+    }
 }

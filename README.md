@@ -11,6 +11,7 @@ Small, allocation-free hashing library in Zig with a unified runtime API and an 
 
 - Unified runtime API via `HashAlgorithm`
 - Hashing for in-memory data and files
+- Streaming API via `RuntimeHasher` (`init`/`update`/`final`)
 - Allocation-free core API (caller-managed output buffer)
 - Optional C ABI for native/FFI integrations
 - Keyed/seeded modes where applicable
@@ -40,6 +41,7 @@ pub const HashAlgorithm
 pub const HashOptions
 pub const Error
 pub const max_digest_length
+pub const RuntimeHasher
 
 pub fn digestLength(alg: HashAlgorithm) usize
 
@@ -56,9 +58,30 @@ pub fn fileHash(
     options: ?HashOptions,
     out: []u8,
 ) !usize
+
+pub fn fileHashInDir(
+    alg: HashAlgorithm,
+    dir: std.fs.Dir,
+    sub_path: []const u8,
+    options: ?HashOptions,
+    out: []u8,
+) !usize
+
+pub fn RuntimeHasher.init(alg: HashAlgorithm, options: ?HashOptions) !RuntimeHasher
+pub fn RuntimeHasher.update(self: *RuntimeHasher, chunk: []const u8) void
+pub fn RuntimeHasher.digestLength(self: *const RuntimeHasher) usize
+pub fn RuntimeHasher.final(self: *RuntimeHasher, out: []u8) !usize
+pub fn RuntimeHasher.finalResult(self: *RuntimeHasher) RuntimeHasher.Digest
+pub fn RuntimeHasher.Digest.slice(self: *const RuntimeHasher.Digest) []const u8
 ```
 
 Return value is digest length in bytes. Digest bytes are written to `out[0..len]`.
+For streaming, `RuntimeHasher.final` uses the same output-buffer contract.
+`RuntimeHasher.finalResult` is a Zig-side convenience helper; consume bytes via
+`digest.slice()`.
+
+`fileHashInDir` is an advanced Zig helper: `sub_path` is resolved relative to
+the provided `std.fs.Dir` instead of `cwd`.
 
 ### Algorithms
 
@@ -113,6 +136,7 @@ Rules:
 ## C ABI
 
 The C ABI lives in `src/c_api.zig`, with header `src/zig_files_hash_c_api.h`.
+Current ABI version: `ZFH_API_VERSION = 2`.
 
 Build artifacts:
 
@@ -138,6 +162,11 @@ zfh_error zfh_digest_length(zfh_algorithm alg, size_t *out_len_ptr);
 const char *zfh_error_message(zfh_error code);
 zfh_error zfh_string_hash(...);
 zfh_error zfh_file_hash(...);
+size_t zfh_hasher_state_size(void);
+size_t zfh_hasher_state_align(void);
+zfh_error zfh_hasher_init_inplace(...);
+zfh_error zfh_hasher_update(...);
+zfh_error zfh_hasher_final(...);
 ```
 
 `zfh_api_version()` returns the same value as `ZFH_API_VERSION`.
@@ -163,8 +192,19 @@ If no options are needed, pass `NULL` for `options_ptr`.
 If options are provided, set `struct_size = sizeof(zfh_options)` (or `ZFH_OPTIONS_STRUCT_SIZE`).
 If `ZFH_OPTION_HAS_KEY` is set with `key_len == 0`, an empty key is passed through.
 This is valid for HMAC algorithms. For `BLAKE3` keyed mode, empty key returns `ZFH_INVALID_KEY_LENGTH`.
-For `zfh_digest_length` / `zfh_string_hash` / `zfh_file_hash`, output length pointers are set to `0` on error.
+For `zfh_digest_length` / `zfh_string_hash` / `zfh_file_hash` / `zfh_hasher_final`,
+output length pointers are set to `0` on error.
 `zfh_file_hash` takes `path_ptr + path_len`; null-terminated C strings are not required.
+
+Streaming contract:
+
+- Query state requirements with `zfh_hasher_state_size` and `zfh_hasher_state_align`.
+- Caller provides an aligned state buffer (`state_ptr`, `state_len`) to `zfh_hasher_init_inplace`.
+- Call `zfh_hasher_update` any number of times with chunked data.
+- Call `zfh_hasher_final` once to write digest bytes.
+- After successful `zfh_hasher_final`, further `zfh_hasher_update`/`zfh_hasher_final`
+  calls on the same state return `ZFH_INVALID_ARGUMENT`.
+- No heap allocations are performed inside this streaming path.
 
 C error model:
 
@@ -218,6 +258,51 @@ pub fn main() !void {
 
     const len = try zfh.fileHash(HashAlgorithm.BLAKE3, path, options, out[0..]);
     std.debug.print("BLAKE3 = {x}\n", .{out[0..len]});
+}
+```
+
+### Hash file in opened directory (`fileHashInDir`)
+
+```zig
+const std = @import("std");
+const zfh = @import("zig_files_hash");
+
+pub fn main() !void {
+    var out: [zfh.max_digest_length]u8 = undefined;
+
+    var dir = try std.fs.cwd().openDir("fixtures", .{});
+    defer dir.close();
+
+    const len = try zfh.fileHashInDir(.@"SHA-256", dir, "sample.bin", null, out[0..]);
+    std.debug.print("SHA-256 = {x}\n", .{out[0..len]});
+}
+```
+
+### Streaming hash (chunked input)
+
+```zig
+const std = @import("std");
+const zfh = @import("zig_files_hash");
+
+pub fn main() !void {
+    // Option A: final(out)
+    var out: [zfh.max_digest_length]u8 = undefined;
+    {
+        var hasher = try zfh.RuntimeHasher.init(.@"SHA-256", null);
+        hasher.update("hello ");
+        hasher.update("world");
+        const len = try hasher.final(out[0..]);
+        std.debug.print("SHA-256 = {x}\n", .{out[0..len]});
+    }
+
+    // Option B: finalResult() + slice()
+    {
+        var hasher = try zfh.RuntimeHasher.init(.@"SHA-256", null);
+        hasher.update("hello ");
+        hasher.update("world");
+        const digest = hasher.finalResult();
+        std.debug.print("SHA-256 = {x}\n", .{digest.slice()});
+    }
 }
 ```
 

@@ -5,7 +5,7 @@ const HashAlgorithm = zfh.HashAlgorithm;
 const HashOptions = zfh.HashOptions;
 const Error = zfh.Error;
 
-pub const ZFH_API_VERSION: u32 = 1;
+pub const ZFH_API_VERSION: u32 = 2;
 
 pub const zfh_error = enum(c_int) {
     ok = 0,
@@ -52,6 +52,14 @@ pub const zfh_options = extern struct {
 
 pub const ZFH_OPTION_HAS_SEED: u32 = 1 << 0;
 pub const ZFH_OPTION_HAS_KEY: u32 = 1 << 1;
+
+const CHASHER_MAGIC: u32 = 0x5A464831; // "ZFH1"
+
+const CHasher = struct {
+    magic: u32,
+    finalized: bool,
+    hasher: zfh.RuntimeHasher,
+};
 
 fn toHashAlgorithm(alg: zfh_algorithm) ?HashAlgorithm {
     return switch (alg) {
@@ -100,6 +108,19 @@ fn parseOptions(options_ptr: ?*const zfh_options) !?HashOptions {
     }
 
     return if (has_any) opts else null;
+}
+
+fn getStatePtr(state_ptr: ?*anyopaque, state_len: usize) !*CHasher {
+    const raw_ptr = state_ptr orelse return error.InvalidState;
+    if (state_len < @sizeOf(CHasher)) return error.InvalidState;
+    if ((@intFromPtr(raw_ptr) % @alignOf(CHasher)) != 0) return error.InvalidState;
+    return @ptrCast(@alignCast(raw_ptr));
+}
+
+fn getInitializedStatePtr(state_ptr: ?*anyopaque, state_len: usize) !*CHasher {
+    const state = try getStatePtr(state_ptr, state_len);
+    if (state.magic != CHASHER_MAGIC) return error.InvalidState;
+    return state;
 }
 
 fn mapError(err: anyerror) zfh_error {
@@ -213,6 +234,74 @@ pub export fn zfh_file_hash(
     return .ok;
 }
 
+pub export fn zfh_hasher_state_size() usize {
+    return @sizeOf(CHasher);
+}
+
+pub export fn zfh_hasher_state_align() usize {
+    return @alignOf(CHasher);
+}
+
+pub export fn zfh_hasher_init_inplace(
+    alg: zfh_algorithm,
+    options_ptr: ?*const zfh_options,
+    state_ptr: ?*anyopaque,
+    state_len: usize,
+) zfh_error {
+    const state = getStatePtr(state_ptr, state_len) catch return .invalid_argument;
+
+    const z_alg = toHashAlgorithm(alg) orelse return .invalid_algorithm;
+    const options = parseOptions(options_ptr) catch return .invalid_argument;
+    const runtime_hasher = zfh.RuntimeHasher.init(z_alg, options) catch |err| return mapError(err);
+
+    state.* = .{
+        .magic = CHASHER_MAGIC,
+        .finalized = false,
+        .hasher = runtime_hasher,
+    };
+    return .ok;
+}
+
+pub export fn zfh_hasher_update(
+    state_ptr: ?*anyopaque,
+    state_len: usize,
+    data_ptr: ?[*]const u8,
+    data_len: usize,
+) zfh_error {
+    const chunk: []const u8 = if (data_len == 0) "" else blk: {
+        const ptr = data_ptr orelse return .invalid_argument;
+        break :blk ptr[0..data_len];
+    };
+
+    var state = getInitializedStatePtr(state_ptr, state_len) catch return .invalid_argument;
+    if (state.finalized) return .invalid_argument;
+    state.hasher.update(chunk);
+    return .ok;
+}
+
+pub export fn zfh_hasher_final(
+    state_ptr: ?*anyopaque,
+    state_len: usize,
+    out_ptr: ?[*]u8,
+    out_len: usize,
+    written_len_ptr: ?*usize,
+) zfh_error {
+    const written_len = written_len_ptr orelse return .invalid_argument;
+    written_len.* = 0;
+
+    const out = blk: {
+        const ptr = out_ptr orelse return .invalid_argument;
+        break :blk ptr[0..out_len];
+    };
+
+    var state = getInitializedStatePtr(state_ptr, state_len) catch return .invalid_argument;
+    if (state.finalized) return .invalid_argument;
+    const written = state.hasher.final(out) catch |err| return mapError(err);
+    state.finalized = true;
+    written_len.* = written;
+    return .ok;
+}
+
 test "c_api: string hash success" {
     const input = "abc";
     var out: [zfh.max_digest_length]u8 = undefined;
@@ -279,4 +368,104 @@ test "c_api: invalid options struct size" {
     const rc = zfh_string_hash(.xxh3_64, input.ptr, input.len, &options, out[0..].ptr, out.len, &written);
     try std.testing.expectEqual(zfh_error.invalid_argument, rc);
     try std.testing.expectEqual(@as(usize, 0), written);
+}
+
+test "c_api: streaming hasher state requirements are non-zero" {
+    try std.testing.expect(zfh_hasher_state_size() > 0);
+    try std.testing.expect(zfh_hasher_state_align() > 0);
+}
+
+test "c_api: streaming hasher success with chunked updates" {
+    const input = "abc";
+    var out: [zfh.max_digest_length]u8 = undefined;
+    var written: usize = 0;
+    var state: CHasher = undefined;
+
+    const init_rc = zfh_hasher_init_inplace(.sha_256, null, &state, @sizeOf(CHasher));
+    try std.testing.expectEqual(zfh_error.ok, init_rc);
+
+    const update1_rc = zfh_hasher_update(&state, @sizeOf(CHasher), input.ptr, 1);
+    try std.testing.expectEqual(zfh_error.ok, update1_rc);
+    const update2_rc = zfh_hasher_update(&state, @sizeOf(CHasher), input.ptr + 1, input.len - 1);
+    try std.testing.expectEqual(zfh_error.ok, update2_rc);
+
+    const final_rc = zfh_hasher_final(&state, @sizeOf(CHasher), out[0..].ptr, out.len, &written);
+    try std.testing.expectEqual(zfh_error.ok, final_rc);
+    try std.testing.expectEqual(@as(usize, 32), written);
+    try std.testing.expectFmt("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "{x}", .{out[0..written]});
+}
+
+test "c_api: streaming hasher key required mapping" {
+    var state: CHasher = undefined;
+
+    const rc = zfh_hasher_init_inplace(.hmac_sha_256, null, &state, @sizeOf(CHasher));
+    try std.testing.expectEqual(zfh_error.key_required, rc);
+}
+
+test "c_api: streaming hasher final buffer too small" {
+    var state: CHasher = undefined;
+    var out: [8]u8 = undefined;
+    var written: usize = 0;
+
+    const init_rc = zfh_hasher_init_inplace(.sha_256, null, &state, @sizeOf(CHasher));
+    try std.testing.expectEqual(zfh_error.ok, init_rc);
+
+    const update_rc = zfh_hasher_update(&state, @sizeOf(CHasher), "abc".ptr, 3);
+    try std.testing.expectEqual(zfh_error.ok, update_rc);
+
+    const final_rc = zfh_hasher_final(&state, @sizeOf(CHasher), out[0..].ptr, out.len, &written);
+    try std.testing.expectEqual(zfh_error.buffer_too_small, final_rc);
+    try std.testing.expectEqual(@as(usize, 0), written);
+}
+
+test "c_api: streaming hasher rejects repeated final" {
+    var state: CHasher = undefined;
+    var out: [zfh.max_digest_length]u8 = undefined;
+    var written: usize = 0;
+
+    const init_rc = zfh_hasher_init_inplace(.sha_256, null, &state, @sizeOf(CHasher));
+    try std.testing.expectEqual(zfh_error.ok, init_rc);
+
+    const update_rc = zfh_hasher_update(&state, @sizeOf(CHasher), "abc".ptr, 3);
+    try std.testing.expectEqual(zfh_error.ok, update_rc);
+
+    const final1_rc = zfh_hasher_final(&state, @sizeOf(CHasher), out[0..].ptr, out.len, &written);
+    try std.testing.expectEqual(zfh_error.ok, final1_rc);
+    try std.testing.expect(written > 0);
+
+    written = 123;
+    const final2_rc = zfh_hasher_final(&state, @sizeOf(CHasher), out[0..].ptr, out.len, &written);
+    try std.testing.expectEqual(zfh_error.invalid_argument, final2_rc);
+    try std.testing.expectEqual(@as(usize, 0), written);
+}
+
+test "c_api: streaming hasher rejects update after final" {
+    var state: CHasher = undefined;
+    var out: [zfh.max_digest_length]u8 = undefined;
+    var written: usize = 0;
+
+    const init_rc = zfh_hasher_init_inplace(.sha_256, null, &state, @sizeOf(CHasher));
+    try std.testing.expectEqual(zfh_error.ok, init_rc);
+
+    const update1_rc = zfh_hasher_update(&state, @sizeOf(CHasher), "abc".ptr, 3);
+    try std.testing.expectEqual(zfh_error.ok, update1_rc);
+
+    const final_rc = zfh_hasher_final(&state, @sizeOf(CHasher), out[0..].ptr, out.len, &written);
+    try std.testing.expectEqual(zfh_error.ok, final_rc);
+
+    const update2_rc = zfh_hasher_update(&state, @sizeOf(CHasher), "x".ptr, 1);
+    try std.testing.expectEqual(zfh_error.invalid_argument, update2_rc);
+}
+
+test "c_api: streaming hasher invalid state size" {
+    var raw_state: [@sizeOf(CHasher)]u8 align(@alignOf(CHasher)) = undefined;
+    const rc = zfh_hasher_init_inplace(.sha_256, null, raw_state[0..].ptr, @sizeOf(CHasher) - 1);
+    try std.testing.expectEqual(zfh_error.invalid_argument, rc);
+}
+
+test "c_api: streaming hasher update rejects uninitialized state" {
+    var state: CHasher = undefined;
+    state.magic = 0;
+    const rc = zfh_hasher_update(&state, @sizeOf(CHasher), "abc".ptr, 3);
+    try std.testing.expectEqual(zfh_error.invalid_argument, rc);
 }

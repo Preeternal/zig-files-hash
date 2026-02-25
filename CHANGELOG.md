@@ -1,5 +1,50 @@
 # Releases
 
+## v0.0.3 - Runtime Hasher and C ABI Streaming
+
+Third public release of `zig-files-hash`, focused on chunked/streaming hashing.
+
+### Highlights
+
+- Added public runtime hasher API in Zig:
+  - `RuntimeHasher.init(alg, options)`
+  - `RuntimeHasher.update(chunk)`
+  - `RuntimeHasher.digestLength()`
+  - `RuntimeHasher.final(out)`
+  - `RuntimeHasher.finalResult()` + `digest.slice()` helper flow
+- `dispatch` now uses `RuntimeHasher` as the shared hashing path.
+- Kept public helper `digestLength(alg)` for non-streaming consumers.
+- Added test coverage for `RuntimeHasher.digestLength`.
+
+### C ABI v2
+
+- ABI version bumped: `ZFH_API_VERSION = 2`.
+- Streaming C ABI now uses caller-provided state buffer (inplace, no heap allocations).
+- Added streaming C functions:
+  - `zfh_hasher_state_size`
+  - `zfh_hasher_state_align`
+  - `zfh_hasher_init_inplace`
+  - `zfh_hasher_update`
+  - `zfh_hasher_final`
+- `zfh_digest_length` now resolves via Zig public `digestLength(alg)` to keep one
+  source of truth for digest sizes.
+- Added C ABI streaming tests (chunked success, key-required mapping,
+  buffer-too-small on final, invalid state checks).
+- Defined post-final behavior for streaming state:
+  repeated `zfh_hasher_final` and `zfh_hasher_update` after final return
+  `ZFH_INVALID_ARGUMENT`.
+
+### Compatibility notes
+
+- Zig API remains allocation-free:
+  - `stringHash` / `fileHash` unchanged for existing usage
+  - streaming is additive via `RuntimeHasher`
+- C API consumers should regenerate bindings against
+  `src/zig_files_hash_c_api.h` (`ZFH_API_VERSION = 2`).
+- Minimum Zig version remains `0.15.2`.
+
+---
+
 ## v0.0.2 - C ABI, Header, and Build Steps
 
 Second public release of `zig-files-hash`, focused on interoperability and packaging.
@@ -42,6 +87,8 @@ zig fetch --save https://github.com/Preeternal/zig-files-hash/archive/refs/tags/
 ### Stability
 
 Pre-1.0 release: API may still evolve in future versions.
+
+---
 
 ## v0.0.1 — First Public Release
 
