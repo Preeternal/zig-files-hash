@@ -346,6 +346,28 @@ test "c_api: key required mapping" {
     try std.testing.expectEqual(zfh_error.key_required, rc);
 }
 
+test "c_api: empty key is valid for hmac" {
+    const input = "abc";
+    var out: [zfh.max_digest_length]u8 = undefined;
+    var written: usize = 0;
+
+    var options = zfh_options{
+        .struct_size = @sizeOf(zfh_options),
+        .flags = ZFH_OPTION_HAS_KEY,
+        .key_ptr = null,
+        .key_len = 0,
+    };
+
+    const rc = zfh_string_hash(.hmac_sha_256, input.ptr, input.len, &options, out[0..].ptr, out.len, &written);
+    try std.testing.expectEqual(zfh_error.ok, rc);
+
+    var expected: [zfh.max_digest_length]u8 = undefined;
+    const expected_written =
+        try zfh.stringHash(.@"HMAC-SHA-256", input, .{ .key = "" }, expected[0..]);
+    try std.testing.expectEqual(expected_written, written);
+    try std.testing.expectEqualSlices(u8, expected[0..expected_written], out[0..written]);
+}
+
 test "c_api: file not found mapping" {
     const path = "definitely_missing_file_123456789.bin";
     var out: [zfh.max_digest_length]u8 = undefined;

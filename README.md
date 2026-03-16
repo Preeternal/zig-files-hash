@@ -34,6 +34,44 @@ const zfh_dep = b.dependency("zig_files_hash", .{
 exe.root_module.addImport("zig_files_hash", zfh_dep.module("zig_files_hash"));
 ```
 
+## AArch64 SHA-2 Performance Note
+
+On AArch64, `SHA-224` / `SHA-256` performance may depend heavily on target CPU
+features (for example, ARM `sha2` crypto extensions). This also affects HMAC
+variants built on the same SHA-2 core.
+
+Generic builds prioritize portability and broad device compatibility, but they
+may fall back to a slower software path. In controlled environments, a
+target-specific build can be much faster.
+
+For example, on AArch64 Android:
+
+Generic / portable build:
+
+```bash
+zig build c-api-static \
+  -Dtarget=aarch64-linux-android.21 \
+  -Doptimize=ReleaseFast
+```
+
+Target-specific performance build:
+
+```bash
+zig build c-api-static \
+  -Dtarget=aarch64-linux-android.21 \
+  -Dcpu=baseline+sha2 \
+  -Doptimize=ReleaseFast
+```
+
+Recommendation:
+
+- For portable distribution, prefer generic targets.
+- For controlled hardware fleets or local benchmarks, compare generic builds
+  against target-specific CPU feature builds before drawing performance
+  conclusions.
+- Do not make target-specific CPU features the default for broad distribution
+  unless you control the deployed hardware.
+
 ## Zig API
 
 ```zig
