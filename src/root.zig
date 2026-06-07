@@ -10,6 +10,10 @@ pub const max_digest_length = algorithms.max_digest_length;
 pub const digestLength = algorithms.digestLength;
 
 pub const RuntimeHasher = algorithms.RuntimeHasher;
+pub const HashStream = dispatch.HashStream;
+pub const Context = dispatch.Context;
+pub const Operation = dispatch.Operation;
+pub const HashRequest = dispatch.HashRequest;
 pub const fileHashInDir = dispatch.fileHashInDir;
 pub const fileHash = dispatch.fileHash;
 pub const stringHash = dispatch.stringHash;

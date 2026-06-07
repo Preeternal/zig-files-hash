@@ -6,9 +6,11 @@ pub const HashOptions = struct {
 };
 
 pub const Error = error{
-    KeyRequired,
+    KeyRequired, //
     InvalidKeyLength,
-    BufferTooSmall,
+    OutputBufferTooSmall,
+    OperationCanceled,
+    InvalidState,
 };
 
 pub const HashAlgorithm = enum {
@@ -77,10 +79,11 @@ pub const RuntimeHasher = union(HashAlgorithm) {
     }
 
     pub fn final(self: *RuntimeHasher, out: []u8) !usize {
+        if (out.len < self.digestLength()) return Error.OutputBufferTooSmall;
+
         switch (self.*) {
             inline else => |*h| {
                 const result = h.final();
-                if (out.len < result.len) return Error.BufferTooSmall;
                 @memcpy(out[0..result.len], result[0..]);
                 return result.len;
             },

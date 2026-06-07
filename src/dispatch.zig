@@ -10,32 +10,112 @@ const HashOptions = algorithms.HashOptions;
 const Error = algorithms.Error;
 const max_digest_length = algorithms.max_digest_length;
 
-pub fn fileHashInDir(alg: HashAlgorithm, dir: std.fs.Dir, sub_path: []const u8, options: ?HashOptions, out: []u8) !usize {
-    var file = try dir.openFile(sub_path, .{});
-    defer file.close();
+pub const Operation = struct {
+    canceled: std.atomic.Value(bool),
 
-    var hasher = try RuntimeHasher.init(alg, options);
+    const order = std.builtin.AtomicOrder.monotonic;
 
-    var buf: [64 * 1024]u8 = undefined;
-    while (true) {
-        const n = try file.read(buf[0..]);
-        if (n == 0) break;
+    pub fn init() Operation {
+        return .{ .canceled = .init(false) };
+    }
+    pub fn cancel(self: *Operation) void {
+        self.canceled.store(true, order);
+    }
+    pub fn isCanceled(self: *const Operation) bool {
+        return self.canceled.load(order);
+    }
+    pub fn checkCanceled(self: *const Operation) !void {
+        if (self.isCanceled()) {
+            return Error.OperationCanceled;
+        }
+    }
+};
 
-        const chunk = buf[0..n];
-        hasher.update(chunk);
+pub fn checkOperationCanceled(operation: ?*const Operation) !void {
+    if (operation) |o| {
+        try o.checkCanceled();
+    }
+}
+
+pub const HashRequest = struct { hash_options: ?HashOptions = null, operation: ?*const Operation = null };
+
+pub const HashStream = struct {
+    hasher: RuntimeHasher,
+    operation: ?*const Operation,
+    finalized: bool,
+
+    pub fn init(alg: HashAlgorithm, request: ?HashRequest) !HashStream {
+        const r = request orelse HashRequest{};
+        try checkOperationCanceled(r.operation);
+        const hasher = try RuntimeHasher.init(alg, r.hash_options);
+        return .{ .hasher = hasher, .operation = r.operation, .finalized = false };
+    }
+    pub fn update(self: *HashStream, chunk: []const u8) !void {
+        if (self.finalized) return Error.InvalidState;
+        try checkOperationCanceled(self.operation);
+        self.hasher.update(chunk);
+    }
+    pub fn digestLength(self: *const HashStream) usize {
+        return self.hasher.digestLength();
+    }
+    pub fn final(self: *HashStream, out: []u8) !usize {
+        if (self.finalized) return Error.InvalidState;
+        try checkOperationCanceled(self.operation);
+        if (out.len < self.digestLength()) return Error.OutputBufferTooSmall;
+        self.finalized = true;
+        return self.hasher.final(out);
+    }
+    pub fn finalResult(self: *HashStream) !RuntimeHasher.Digest {
+        if (self.finalized) return Error.InvalidState;
+        try checkOperationCanceled(self.operation);
+        self.finalized = true;
+        return self.hasher.finalResult();
+    }
+};
+
+pub const Context = struct {
+    io: std.Io,
+    pub fn init(io: std.Io) Context {
+        return .{ .io = io };
     }
 
-    return hasher.final(out);
+    pub fn fileHashInDir(self: *const Context, alg: HashAlgorithm, dir: std.Io.Dir, sub_path: []const u8, out: []u8, request: ?HashRequest) !usize {
+        const io = self.io;
+        var file = try dir.openFile(io, sub_path, .{});
+        defer file.close(io);
+
+        var stream = try HashStream.init(alg, request);
+
+        var buf: [64 * 1024]u8 = undefined;
+        var file_reader = file.reader(io, &.{});
+        while (true) {
+            const n = try file_reader.interface.readSliceShort(buf[0..]);
+            if (n == 0) break;
+
+            const chunk = buf[0..n];
+            try stream.update(chunk);
+        }
+
+        return stream.final(out);
+    }
+
+    pub fn fileHash(self: *const Context, alg: HashAlgorithm, path: []const u8, out: []u8, request: ?HashRequest) !usize {
+        return self.fileHashInDir(alg, std.Io.Dir.cwd(), path, out, request);
+    }
+};
+
+pub fn fileHashInDir(io: std.Io, alg: HashAlgorithm, dir: std.Io.Dir, sub_path: []const u8, out: []u8, request: ?HashRequest) !usize {
+    return Context.init(io).fileHashInDir(alg, dir, sub_path, out, request);
 }
 
-pub fn fileHash(alg: HashAlgorithm, path: []const u8, options: ?HashOptions, out: []u8) !usize {
-    return fileHashInDir(alg, std.fs.cwd(), path, options, out);
+pub fn fileHash(io: std.Io, alg: HashAlgorithm, path: []const u8, out: []u8, request: ?HashRequest) !usize {
+    return fileHashInDir(io, alg, std.Io.Dir.cwd(), path, out, request);
 }
 
-pub fn stringHash(alg: HashAlgorithm, data: []const u8, options: ?HashOptions, out: []u8) !usize {
-    var hasher = try RuntimeHasher.init(alg, options);
-    hasher.update(data);
-    return hasher.final(out);
+pub fn stringHash(alg: HashAlgorithm, data: []const u8, out: []u8, request: ?HashRequest) !usize {
+    var stream = try HashStream.init(alg, request);
+    try stream.update(data);
+    return stream.final(out);
 }
 
 pub fn getDemoOptionsArray(alg: HashAlgorithm) []const ?HashOptions {
@@ -67,11 +147,11 @@ fn expectDeterministicStringHash(alg: HashAlgorithm) !void {
         const data = "Hello, world!";
 
         var out_buf1: [max_digest_length]u8 = undefined;
-        const size1 = try stringHash(alg, data, options, out_buf1[0..]);
+        const size1 = try stringHash(alg, data, out_buf1[0..], .{ .hash_options = options });
         const hash1 = out_buf1[0..size1];
 
         var out_buf2: [max_digest_length]u8 = undefined;
-        const size2 = try stringHash(alg, data, options, out_buf2[0..]);
+        const size2 = try stringHash(alg, data, out_buf2[0..], .{ .hash_options = options });
         const hash2 = out_buf2[0..size2];
 
         try std.testing.expectEqualSlices(u8, hash1, hash2);
@@ -90,32 +170,38 @@ fn expectFileHashDeterminismAndConsistency(alg: HashAlgorithm) !void {
     defer tmp.cleanup();
     const file_name = "test.bin";
     const data = "Hello, world!";
+    const io = std.testing.io;
 
     {
-        const file = try tmp.dir.createFile(file_name, .{
+        const file = try tmp.dir.createFile(io, file_name, .{
             .truncate = true,
         });
-        defer file.close();
-        try file.writeAll(data);
+        defer file.close(io);
+        try file.writeStreamingAll(io, data);
     }
 
     const options_array = getDemoOptionsArray(alg);
     for (options_array) |options| {
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const real_path = try tmp.dir.realpath(file_name, &path_buf);
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const real_path_size = try tmp.dir.realPathFile(io, file_name, &path_buf);
+        const real_path = path_buf[0..real_path_size];
 
         var out_buf1: [max_digest_length]u8 = undefined;
-        const size_file1 = try fileHash(alg, real_path, options, out_buf1[0..]);
+        const size_file1 = try fileHash(io, alg, real_path, out_buf1[0..], .{
+            .hash_options = options,
+        });
         const hash1 = out_buf1[0..size_file1];
 
         var out_buf2: [max_digest_length]u8 = undefined;
-        const size_file2 = try fileHash(alg, real_path, options, out_buf2[0..]);
+        const size_file2 = try fileHash(io, alg, real_path, out_buf2[0..], .{
+            .hash_options = options,
+        });
         const hash2 = out_buf2[0..size_file2];
 
         try std.testing.expectEqualSlices(u8, hash1, hash2);
 
         var out_buf3: [max_digest_length]u8 = undefined;
-        const size_string = try stringHash(alg, data, options, out_buf3[0..]);
+        const size_string = try stringHash(alg, data, out_buf3[0..], .{ .hash_options = options });
         const hash3 = out_buf3[0..size_string];
 
         try std.testing.expectEqualSlices(u8, hash1, hash3);
@@ -137,11 +223,11 @@ test "different input produces different hash" {
         const options_array = getDemoOptionsArray(alg);
         for (options_array) |options| {
             var out_buf1: [max_digest_length]u8 = undefined;
-            const size1 = try stringHash(alg, data1, options, out_buf1[0..]);
+            const size1 = try stringHash(alg, data1, out_buf1[0..], .{ .hash_options = options });
             const hash1 = out_buf1[0..size1];
 
             var out_buf2: [max_digest_length]u8 = undefined;
-            const size2 = try stringHash(alg, data2, options, out_buf2[0..]);
+            const size2 = try stringHash(alg, data2, out_buf2[0..], .{ .hash_options = options });
             const hash2 = out_buf2[0..size2];
 
             try std.testing.expect(!std.mem.eql(u8, hash1, hash2));
@@ -172,11 +258,11 @@ test "different options produce different hash" {
                 const options2 = null;
 
                 var out_buf1: [max_digest_length]u8 = undefined;
-                const size1 = try stringHash(alg, data, options1, out_buf1[0..]);
+                const size1 = try stringHash(alg, data, out_buf1[0..], .{ .hash_options = options1 });
                 const hash1 = out_buf1[0..size1];
 
                 var out_buf2: [max_digest_length]u8 = undefined;
-                const size2 = try stringHash(alg, data, options2, out_buf2[0..]);
+                const size2 = try stringHash(alg, data, out_buf2[0..], .{ .hash_options = options2 });
                 const hash2 = out_buf2[0..size2];
 
                 try std.testing.expect(!std.mem.eql(u8, hash1[0..], hash2[0..]));
@@ -189,11 +275,11 @@ test "different options produce different hash" {
 
                 var out_buf1: [max_digest_length]u8 = undefined;
 
-                const size1 = try stringHash(alg, data, options1, out_buf1[0..]);
+                const size1 = try stringHash(alg, data, out_buf1[0..], .{ .hash_options = options1 });
                 const hash1 = out_buf1[0..size1];
 
                 var out_buf2: [max_digest_length]u8 = undefined;
-                const size2 = try stringHash(alg, data, options2, out_buf2[0..]);
+                const size2 = try stringHash(alg, data, out_buf2[0..], .{ .hash_options = options2 });
                 const hash2 = out_buf2[0..size2];
 
                 try std.testing.expect(!std.mem.eql(u8, hash1[0..], hash2[0..]));
@@ -206,11 +292,11 @@ test "different options produce different hash" {
 
                 var out_buf1: [max_digest_length]u8 = undefined;
 
-                const size1 = try stringHash(alg, data, options1, out_buf1[0..]);
+                const size1 = try stringHash(alg, data, out_buf1[0..], .{ .hash_options = options1 });
                 const hash1 = out_buf1[0..size1];
 
                 var out_buf2: [max_digest_length]u8 = undefined;
-                const size2 = try stringHash(alg, data, options2, out_buf2[0..]);
+                const size2 = try stringHash(alg, data, out_buf2[0..], .{ .hash_options = options2 });
                 const hash2 = out_buf2[0..size2];
 
                 try std.testing.expect(!std.mem.eql(u8, hash1[0..], hash2[0..]));
@@ -228,11 +314,11 @@ test "empty input produces deterministic hash" {
         for (options_array) |options| {
             var out_buf1: [max_digest_length]u8 = undefined;
 
-            const size1 = try stringHash(alg, empty, options, out_buf1[0..]);
+            const size1 = try stringHash(alg, empty, out_buf1[0..], .{ .hash_options = options });
             const hash1 = out_buf1[0..size1];
 
             var out_buf2: [max_digest_length]u8 = undefined;
-            const size2 = try stringHash(alg, empty, options, out_buf2[0..]);
+            const size2 = try stringHash(alg, empty, out_buf2[0..], .{ .hash_options = options });
             const hash2 = out_buf2[0..size2];
 
             // Only check determinism for empty input (no known-good hash comparison).
@@ -242,6 +328,7 @@ test "empty input produces deterministic hash" {
 }
 
 test "multi-chunk file (>64KB) hash matches string hash" {
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const sub_path = "test.bin";
@@ -251,21 +338,23 @@ test "multi-chunk file (>64KB) hash matches string hash" {
     }
 
     {
-        const file = try tmp.dir.createFile(sub_path, .{
+        const file = try tmp.dir.createFile(io, sub_path, .{
             .truncate = true,
         });
-        defer file.close();
-        try file.writeAll(data[0..]);
+        defer file.close(io);
+        try file.writeStreamingAll(io, data[0..]);
     }
     inline for (runtime_hasher_union_fields) |field| {
         const alg = @field(HashAlgorithm, field.name);
         const options_array = getDemoOptionsArray(alg);
         for (options_array) |options| {
             var out_buf_file: [max_digest_length]u8 = undefined;
-            const out_len_file = try fileHashInDir(alg, tmp.dir, sub_path, options, out_buf_file[0..]);
+            const out_len_file = try fileHashInDir(io, alg, tmp.dir, sub_path, out_buf_file[0..], .{
+                .hash_options = options,
+            });
             const hash1 = out_buf_file[0..out_len_file];
             var out_buf_str: [max_digest_length]u8 = undefined;
-            const out_len_str = try stringHash(alg, data[0..], options, out_buf_str[0..]);
+            const out_len_str = try stringHash(alg, data[0..], out_buf_str[0..], .{ .hash_options = options });
             const hash2 = out_buf_str[0..out_len_str];
             try std.testing.expectEqualSlices(u8, hash1, hash2);
         }
@@ -273,17 +362,18 @@ test "multi-chunk file (>64KB) hash matches string hash" {
 }
 
 test "Public API produces same hash as direct API" {
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const data = "Hello, world!";
     const file_name = "test.bin";
 
     {
-        const file = try tmp.dir.createFile(file_name, .{
+        const file = try tmp.dir.createFile(io, file_name, .{
             .truncate = true,
         });
-        defer file.close();
-        try file.writeAll(data);
+        defer file.close(io);
+        try file.writeStreamingAll(io, data);
     }
 
     inline for (runtime_hasher_union_fields) |field| {
@@ -291,31 +381,37 @@ test "Public API produces same hash as direct API" {
         const options_array = getDemoOptionsArray(alg);
         for (options_array) |options| {
             var out_buf_dir_file: [max_digest_length]u8 = undefined;
-            const size_dir_file = try fileHashInDir(alg, tmp.dir, file_name, options, out_buf_dir_file[0..]);
+            const size_dir_file = try fileHashInDir(io, alg, tmp.dir, file_name, out_buf_dir_file[0..], .{
+                .hash_options = options,
+            });
             const dir_bytes = out_buf_dir_file[0..size_dir_file];
 
             var out_buf_file: [max_digest_length]u8 = undefined;
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const real_path = try tmp.dir.realpath(file_name, &path_buf);
-            const size_file = try fileHash(alg, real_path, options, out_buf_file[0..]);
+            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            const real_path_size = try tmp.dir.realPathFile(io, file_name, &path_buf);
+            const real_path = path_buf[0..real_path_size];
+            const size_file = try fileHash(io, alg, real_path, out_buf_file[0..], .{
+                .hash_options = options,
+            });
             const public_bytes_file = out_buf_file[0..size_file];
 
             try std.testing.expectEqualSlices(u8, dir_bytes, public_bytes_file);
 
-            var file = try tmp.dir.openFile(file_name, .{});
-            defer file.close();
+            var file = try tmp.dir.openFile(io, file_name, .{});
+            defer file.close(io);
 
-            var hasher = try RuntimeHasher.init(alg, options);
+            var stream = try HashStream.init(alg, .{ .hash_options = options });
             var buf: [64 * 1024]u8 = undefined;
+            var file_reader = file.reader(io, &.{});
             while (true) {
-                const n = try file.read(buf[0..]);
+                const n = try file_reader.interface.readSliceShort(buf[0..]);
                 if (n == 0) break;
 
                 const chunk = buf[0..n];
-                hasher.update(chunk);
+                try stream.update(chunk);
             }
 
-            const digest = hasher.finalResult();
+            const digest = try stream.finalResult();
             const bytes = digest.slice();
             try std.testing.expectEqualSlices(u8, dir_bytes, bytes);
         }
@@ -328,14 +424,14 @@ test "SHA-256 NIST FIPS 180-4" {
     const abc = "abc";
     const expected_hex = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
-    const abc_size = try stringHash(HashAlgorithm.@"SHA-256", abc, null, out_buf[0..]);
+    const abc_size = try stringHash(HashAlgorithm.@"SHA-256", abc, out_buf[0..], null);
     const abc_hash = out_buf[0..abc_size];
     try std.testing.expectFmt(expected_hex, "{x}", .{abc_hash});
 
     const empty_str = "";
     const expected_empty_hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
-    const empty_size = try stringHash(HashAlgorithm.@"SHA-256", empty_str, null, out_buf[0..]);
+    const empty_size = try stringHash(HashAlgorithm.@"SHA-256", empty_str, out_buf[0..], null);
     const empty_hash = out_buf[0..empty_size];
     try std.testing.expectFmt(expected_empty_hex, "{x}", .{empty_hash});
 }
@@ -347,7 +443,7 @@ test "Blake3 test vector" {
     const expected_hex_xof = "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262e00f03e7b69af26b7faaf09fcd333050338ddfe085b8cc869ca98b206c08243a26f5487789e8f660afe6c99ef9e0c52b92e7393024a80459cf91f476f9ffdbda7001c22e159b402631f277ca96f2defdf1078282314e763699a31c5363165421cce14d";
     const expected_hex = expected_hex_xof[0 .. std.crypto.hash.Blake3.digest_length * 2];
 
-    const size = try stringHash(HashAlgorithm.BLAKE3, empty_str, null, out_buf[0..]);
+    const size = try stringHash(HashAlgorithm.BLAKE3, empty_str, out_buf[0..], null);
     const hash = out_buf[0..size];
     try std.testing.expectFmt(expected_hex, "{x}", .{hash});
 }
@@ -358,7 +454,7 @@ test "XXH3-64 test vector" {
     const data = "Hello, world!";
     const expected_hex = "f3c34bf11915e869";
 
-    const size = try stringHash(HashAlgorithm.@"XXH3-64", data, null, out_buf[0..]);
+    const size = try stringHash(HashAlgorithm.@"XXH3-64", data, out_buf[0..], null);
     const hash = out_buf[0..size];
     try std.testing.expectFmt(expected_hex, "{x}", .{hash});
 }
@@ -369,7 +465,7 @@ test "RFC 4231 HMAC SHA-256 test vector" {
     const key = "Jefe";
     const data = "what do ya want for nothing?";
     const expected_hex = "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843";
-    const size = try stringHash(HashAlgorithm.@"HMAC-SHA-256", data, .{ .key = key }, out_buf[0..]);
+    const size = try stringHash(HashAlgorithm.@"HMAC-SHA-256", data, out_buf[0..], .{ .hash_options = .{ .key = key } });
     const hash = out_buf[0..size];
     try std.testing.expectFmt(expected_hex, "{x}", .{hash});
 }
@@ -390,17 +486,73 @@ test "random stress test" {
 
             for (options_array) |options| {
                 var out_buf1: [max_digest_length]u8 = undefined;
-                const size1 = try stringHash(alg, buf[0..len], options, out_buf1[0..]);
+                const size1 = try stringHash(alg, buf[0..len], out_buf1[0..], .{ .hash_options = options });
                 const h1 = out_buf1[0..size1];
 
                 var out_buf2: [max_digest_length]u8 = undefined;
-                const size2 = try stringHash(alg, buf[0..len], options, out_buf2[0..]);
+                const size2 = try stringHash(alg, buf[0..len], out_buf2[0..], .{ .hash_options = options });
                 const h2 = out_buf2[0..size2];
 
                 try std.testing.expectEqualSlices(u8, h1, h2);
             }
         }
     }
+}
+
+test "HashStream rejects update and final after final" {
+    var out_buf: [max_digest_length]u8 = undefined;
+    var stream = try HashStream.init(HashAlgorithm.@"SHA-256", null);
+
+    try stream.update("abc");
+    const size = try stream.final(out_buf[0..]);
+    try std.testing.expectEqual(@as(usize, 32), size);
+
+    try std.testing.expectError(Error.InvalidState, stream.update("def"));
+    try std.testing.expectError(Error.InvalidState, stream.final(out_buf[0..]));
+    try std.testing.expectError(Error.InvalidState, stream.finalResult());
+}
+
+test "HashStream can retry final after OutputBufferTooSmall" {
+    var small_out: [8]u8 = undefined;
+    var out_buf: [max_digest_length]u8 = undefined;
+    var stream = try HashStream.init(HashAlgorithm.@"SHA-256", null);
+
+    try stream.update("abc");
+    try std.testing.expectError(Error.OutputBufferTooSmall, stream.final(small_out[0..]));
+
+    const size = try stream.final(out_buf[0..]);
+    try std.testing.expectEqual(@as(usize, 32), size);
+    try std.testing.expectFmt("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "{x}", .{out_buf[0..size]});
+}
+
+test "fileHash returns OperationCanceled when operation is already canceled" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const data = "Hello, world!";
+    const file_name = "test.bin";
+
+    {
+        const file = try tmp.dir.createFile(io, file_name, .{
+            .truncate = true,
+        });
+        defer file.close(io);
+        try file.writeStreamingAll(io, data);
+    }
+
+    const context = Context.init(io);
+    var operation = Operation.init();
+
+    var out_buf: [max_digest_length]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const real_path_size = try tmp.dir.realPathFile(io, file_name, &path_buf);
+    const real_path = path_buf[0..real_path_size];
+    operation.cancel();
+    const size_file = context.fileHash(HashAlgorithm.@"SHA-256", real_path, out_buf[0..], .{
+        .operation = &operation,
+    });
+    try std.testing.expectError(Error.OperationCanceled, size_file);
 }
 
 // test "fuzz example" {

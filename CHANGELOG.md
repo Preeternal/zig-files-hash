@@ -1,5 +1,66 @@
 # Releases
 
+## v0.0.4 - Zig 0.16 and C ABI v3
+
+Migration release for Zig 0.16 and the new request/context/cancellation model.
+
+### Highlights
+
+- Minimum Zig version raised to `0.16.0`.
+- File hashing now accepts explicit `std.Io`.
+- Added `Context` as a reusable `std.Io` wrapper for one-shot file hashing:
+  - `Context.init`
+  - `Context.fileHash`
+  - `Context.fileHashInDir`
+- Added `HashRequest` with:
+  - `hash_options`
+  - `operation`
+- Added cooperative cancellation through `Operation`.
+- Added high-level cancellable streaming API:
+  - `HashStream.init`
+  - `HashStream.update`
+  - `HashStream.digestLength`
+  - `HashStream.final`
+  - `HashStream.finalResult`
+- `HashStream` now rejects `update`, `final`, and `finalResult` after
+  finalization with `error.InvalidState`.
+- `stringHash`, `fileHash`, and `fileHashInDir` now use `HashRequest`.
+- `RuntimeHasher` remains public as a lower-level hasher without request/cancel handling.
+
+### C ABI v3
+
+- ABI version bumped: `ZFH_API_VERSION = 3`.
+- C enums and mappings are generated from `tools/c_api`.
+- Added generated header:
+  - `zig_files_hash_c_api_generated.h`
+- Added `zfh_request` to carry options and optional operation state.
+- Added explicit C context API for file hashing:
+  - `zfh_context_create`
+  - `zfh_context_destroy`
+  - `zfh_context_file_hash`
+- Removed the old path-only `zfh_file_hash` entry point from the public C ABI.
+- Added in-place operation state API:
+  - `zfh_operation_state_size`
+  - `zfh_operation_state_align`
+  - `zfh_operation_init_inplace`
+  - `zfh_operation_cancel`
+- `zfh_hasher_init_inplace` now accepts `const zfh_request*` instead of
+  `const zfh_options*`.
+- C streaming state now wraps Zig `HashStream`, so `zfh_hasher_update` and
+  `zfh_hasher_final` can return `ZFH_OPERATION_CANCELED`.
+- Unknown `zfh_options.flags` bits are rejected as `ZFH_INVALID_ARGUMENT`.
+- Error `ZFH_BUFFER_TOO_SMALL` was renamed to `ZFH_OUTPUT_BUFFER_TOO_SMALL`.
+
+### Compatibility notes
+
+- This is a breaking release for both Zig API and C ABI consumers.
+- C consumers should regenerate bindings against
+  `src/zig_files_hash_c_api.h` and `src/zig_files_hash_c_api_generated.h`.
+- Callers that already own file reading should prefer C streaming APIs.
+- Callers that want path-based file hashing from C should create a `zfh_context`.
+
+---
+
 ## v0.0.3 - Runtime Hasher and C ABI Streaming
 
 Third public release of `zig-files-hash`, focused on chunked/streaming hashing.

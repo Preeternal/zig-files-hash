@@ -44,12 +44,13 @@ test "public API stringHash returns expected sizes" {
 
     for (cases) |c| {
         var out: [max_digest_length]u8 = undefined;
-        const size = try stringHash(c.alg, data, c.options, out[0..]);
+        const size = try stringHash(c.alg, data, out[0..], .{ .hash_options = c.options });
         try std.testing.expectEqual(expectedDigestLen(c.alg), size);
     }
 }
 
 test "public API fileHash matches stringHash bytes" {
+    const io = std.testing.io;
     const data = "Hello, world!";
 
     var tmp = std.testing.tmpDir(.{});
@@ -57,13 +58,14 @@ test "public API fileHash matches stringHash bytes" {
     const file_name = "api_test.bin";
 
     {
-        const file = try tmp.dir.createFile(file_name, .{ .truncate = true });
-        defer file.close();
-        try file.writeAll(data);
+        const file = try tmp.dir.createFile(io, file_name, .{ .truncate = true });
+        defer file.close(io);
+        try file.writeStreamingAll(io, data);
     }
 
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const real_path = try tmp.dir.realpath(file_name, &path_buf);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const real_path_size = try tmp.dir.realPathFile(io, file_name, &path_buf);
+    const real_path = path_buf[0..real_path_size];
 
     const cases = [_]struct {
         alg: HashAlgorithm,
@@ -79,8 +81,8 @@ test "public API fileHash matches stringHash bytes" {
         var file_out: [max_digest_length]u8 = undefined;
         var string_out: [max_digest_length]u8 = undefined;
 
-        const file_size = try fileHash(c.alg, real_path, c.options, file_out[0..]);
-        const string_size = try stringHash(c.alg, data, c.options, string_out[0..]);
+        const file_size = try fileHash(io, c.alg, real_path, file_out[0..], .{ .hash_options = c.options });
+        const string_size = try stringHash(c.alg, data, string_out[0..], .{ .hash_options = c.options });
 
         try std.testing.expectEqual(file_size, string_size);
         try std.testing.expectEqual(expectedDigestLen(c.alg), file_size);
@@ -88,11 +90,11 @@ test "public API fileHash matches stringHash bytes" {
     }
 }
 
-test "public API returns BufferTooSmall" {
+test "public API returns OutputBufferTooSmall" {
     var out: [8]u8 = undefined;
     try std.testing.expectError(
-        Error.BufferTooSmall,
-        stringHash(.@"SHA-512", "abc", null, out[0..]),
+        Error.OutputBufferTooSmall,
+        stringHash(.@"SHA-512", "abc", out[0..], null),
     );
 }
 
@@ -100,7 +102,7 @@ test "public API returns KeyRequired for HMAC" {
     var out: [max_digest_length]u8 = undefined;
     try std.testing.expectError(
         Error.KeyRequired,
-        stringHash(.@"HMAC-SHA-256", "abc", null, out[0..]),
+        stringHash(.@"HMAC-SHA-256", "abc", out[0..], null),
     );
 }
 
@@ -108,6 +110,6 @@ test "public API returns InvalidKeyLength for BLAKE3 keyed mode" {
     var out: [max_digest_length]u8 = undefined;
     try std.testing.expectError(
         Error.InvalidKeyLength,
-        stringHash(.BLAKE3, "abc", .{ .key = "short" }, out[0..]),
+        stringHash(.BLAKE3, "abc", out[0..], .{ .hash_options = .{ .key = "short" } }),
     );
 }

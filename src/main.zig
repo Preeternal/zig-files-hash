@@ -6,23 +6,25 @@ const HashAlgorithm = zig_files_hash.HashAlgorithm;
 const max_digest_length = zig_files_hash.max_digest_length;
 const fileHash = zig_files_hash.fileHash;
 const stringHash = zig_files_hash.stringHash;
+const Context = zig_files_hash.Context;
+const Operation = zig_files_hash.Operation;
 const getDemoOptionsArray = zig_files_hash.getDemoOptionsArray;
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     std.debug.print("Running in {s} mode\n", .{@tagName(builtin_mode)});
 
     if (builtin_mode == .Debug) {
-        var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
-        defer std.debug.assert(gpa.deinit() == .ok);
+        var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+        defer _ = debug_allocator.deinit();
 
-        try run(gpa.allocator());
+        try run(debug_allocator.allocator(), init);
     } else {
-        try run(std.heap.page_allocator);
+        try run(std.heap.page_allocator, init);
     }
 }
 
-fn run(al: std.mem.Allocator) !void {
-    var args_iterator = try std.process.argsWithAllocator(al);
+fn run(al: std.mem.Allocator, init: std.process.Init) !void {
+    var args_iterator = try init.minimal.args.iterateAllocator(al);
     defer args_iterator.deinit();
 
     _ = args_iterator.next(); // skip argv[0]
@@ -32,24 +34,28 @@ fn run(al: std.mem.Allocator) !void {
     };
 
     std.debug.print("First argument: {s}\n", .{path});
+    const io = init.io;
 
-    try demoAllAlgorithms(path);
+    try demoAllAlgorithms(io, path);
 
     var out_buf: [max_digest_length]u8 = undefined;
-    const size = try fileHash(HashAlgorithm.BLAKE3, path, null, out_buf[0..]);
+
+    const size = try fileHash(io, HashAlgorithm.BLAKE3, path, out_buf[0..], null);
     std.debug.print("BLAKE3 (public API file input) = {x}\n", .{out_buf[0..size]});
 
-    const size2 = try stringHash(HashAlgorithm.BLAKE3, "Hello, world!", null, out_buf[0..]);
+    const size2 = try stringHash(HashAlgorithm.BLAKE3, "Hello, world!", out_buf[0..], null);
     std.debug.print("BLAKE3 (public API string input) = {x}\n", .{out_buf[0..size2]});
 }
 
-pub fn demoAllAlgorithms(path: []const u8) !void {
+pub fn demoAllAlgorithms(io: std.Io, path: []const u8) !void {
     inline for (@typeInfo(HashAlgorithm).@"enum".fields) |field| {
         const alg: HashAlgorithm = @enumFromInt(field.value);
         const options_array = getDemoOptionsArray(alg);
+        const context = Context.init(io);
         for (options_array, 0..) |options, i| {
             var out_buf: [max_digest_length]u8 = undefined;
-            const size = try fileHash(alg, path, options, out_buf[0..]);
+            var operation = Operation.init();
+            const size = try context.fileHash(alg, path, out_buf[0..], .{ .hash_options = options, .operation = &operation });
             const hash_slice = out_buf[0..size];
             const suffix = if (alg == HashAlgorithm.BLAKE3 and i == 1) "-KEYED" else if (alg == HashAlgorithm.@"XXH3-64" and i == 1) "-SEEDED" else "";
             std.debug.print("{s}{s} = {x}\n", .{ @tagName(alg), suffix, hash_slice });

@@ -47,6 +47,23 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const gen_c_api = b.addExecutable(.{
+        .name = "gen_c_api",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/c_api/gen.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_files_hash", .module = mod },
+            },
+        }),
+    });
+    const run_gen_c_api = b.addRunArtifact(gen_c_api);
+    run_gen_c_api.setCwd(b.path("."));
+
+    const gen_c_api_step = b.step("gen-c-api", "Generate C ABI enum and mapping files");
+    gen_c_api_step.dependOn(&run_gen_c_api.step);
+
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
     // to the module defined above, it's sometimes preferable to split business
@@ -101,6 +118,7 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
         .root_module = c_api_mod,
     });
+    c_api_static.step.dependOn(&run_gen_c_api.step);
 
     // C ABI shared library (.dylib / .so / .dll)
     const c_api_shared = b.addLibrary(.{
@@ -108,6 +126,7 @@ pub fn build(b: *std.Build) void {
         .linkage = .dynamic,
         .root_module = c_api_mod,
     });
+    c_api_shared.step.dependOn(&run_gen_c_api.step);
 
     const install_c_api_static = b.addInstallArtifact(c_api_static, .{
         .h_dir = .disabled,
@@ -116,12 +135,20 @@ pub fn build(b: *std.Build) void {
         .h_dir = .disabled,
     });
 
-    // NOTE: Zig 0.15.2 currently does not reliably emit .h for this library
-    // with -femit-h in this setup, so we install the maintained C header file.
+    // Install maintained C headers explicitly. The public C ABI is split
+    // between generated declarations and hand-written API surface, so we do not
+    // rely on compiler-emitted headers here.
+    const install_c_api_header_generated = b.addInstallHeaderFile(
+        b.path("src/zig_files_hash_c_api_generated.h"),
+        "zig_files_hash_c_api_generated.h",
+    );
+    install_c_api_header_generated.step.dependOn(&run_gen_c_api.step);
+
     const install_c_api_header = b.addInstallHeaderFile(
         b.path("src/zig_files_hash_c_api.h"),
         "zig_files_hash_c_api.h",
     );
+    install_c_api_header.step.dependOn(&run_gen_c_api.step);
 
     const c_api_static_step = b.step("c-api-static", "Build C ABI static library");
     c_api_static_step.dependOn(&install_c_api_static.step);
@@ -130,11 +157,13 @@ pub fn build(b: *std.Build) void {
     c_api_shared_step.dependOn(&install_c_api_shared.step);
 
     const c_api_header_step = b.step("c-api-header", "Install C ABI header");
+    c_api_header_step.dependOn(&install_c_api_header_generated.step);
     c_api_header_step.dependOn(&install_c_api_header.step);
 
     const c_api_step = b.step("c-api", "Build C ABI artifacts (static/shared/header)");
     c_api_step.dependOn(&install_c_api_static.step);
     c_api_step.dependOn(&install_c_api_shared.step);
+    c_api_step.dependOn(&install_c_api_header_generated.step);
     c_api_step.dependOn(&install_c_api_header.step);
 
     // This creates a top level step. Top level steps have a name and can be
