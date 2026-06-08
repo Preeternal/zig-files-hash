@@ -47,14 +47,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const gen_api_mod = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = b.graph.host,
+        .optimize = optimize,
+    });
+
     const gen_c_api = b.addExecutable(.{
         .name = "gen_c_api",
         .root_module = b.createModule(.{
             .root_source_file = b.path("tools/c_api/gen.zig"),
-            .target = target,
+            .target = b.graph.host,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "zig_files_hash", .module = mod },
+                .{ .name = "zig_files_hash", .module = gen_api_mod },
             },
         }),
     });
