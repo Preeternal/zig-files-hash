@@ -1,4 +1,9 @@
 const std = @import("std");
+
+pub const std_options: std.Options = .{
+    .allow_stack_tracing = false,
+};
+
 const zfh = @import("root.zig");
 const common = @import("c_api/common.zig");
 const context = @import("c_api/context.zig");

@@ -1,5 +1,29 @@
 # Releases
 
+## v0.0.5 - C ABI build fixes
+
+Patch release for C ABI consumers and mobile prebuilt builds.
+
+### Highlights
+
+- C ABI version remains `ZFH_API_VERSION = 3`.
+- C ABI artifacts now disable Zig stack tracing at the C ABI root. This avoids
+  pulling stack trace/self-info code into release prebuilts and fixes iOS
+  `ReleaseFast` link failures caused by unavailable dyld symbols.
+- C API generator builds for the host target even when the requested library
+  target is Android/iOS or another cross target. This keeps `zig build c-api-*`
+  usable during cross-compilation because the generator binary is executed on
+  the build machine.
+- Package version bumped to `0.0.5`.
+
+### Compatibility notes
+
+- No Zig API changes.
+- No C ABI signature changes.
+- C consumers that already migrated to C ABI v3 do not need binding changes.
+
+---
+
 ## v0.0.4 - Zig 0.16 and C ABI v3
 
 Migration release for Zig 0.16 and the new request/context/cancellation model.
