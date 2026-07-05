@@ -124,6 +124,9 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
         .root_module = c_api_mod,
     });
+    if (target.result.os.tag == .windows) {
+        c_api_static.bundle_compiler_rt = true;
+    }
     c_api_static.step.dependOn(&run_gen_c_api.step);
 
     // C ABI shared library (.dylib / .so / .dll)

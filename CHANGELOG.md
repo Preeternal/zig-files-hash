@@ -1,5 +1,24 @@
 # Releases
 
+## v0.0.6 - Windows MSVC static C ABI link fix
+
+Patch release for Windows C ABI static library consumers.
+
+### Highlights
+
+- C ABI version remains `ZFH_API_VERSION = 3`.
+- Windows C ABI static `.lib` builds now bundle Zig compiler-rt.
+- Fixes MSVC consumers failing to link unresolved Zig/LLVM runtime helper symbols such as `__divti3`.
+
+### Compatibility notes
+
+- No Zig API changes.
+- No C ABI signature changes.
+- Non-Windows static library artifacts keep their previous compiler-rt bundling behavior.
+- C consumers using C ABI v3 do not need binding changes.
+
+---
+
 ## v0.0.5 - C ABI build fixes
 
 Patch release for C ABI consumers and mobile prebuilt builds.

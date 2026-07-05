@@ -7,5 +7,7 @@ zig-out/
 # Copilot Instructions
 .github/copilot-instructions.md
 
+# Local notes
+docs/planned-*.md
 notes.md
 some.zig
