@@ -84,6 +84,8 @@ pub const Context = struct {
         var file = try dir.openFile(io, sub_path, .{});
         defer file.close(io);
 
+        // const fd = file.handle;
+
         var stream = try HashStream.init(alg, request);
 
         var buf: [64 * 1024]u8 = undefined;
@@ -574,7 +576,15 @@ test "fileHash returns OperationCanceled when operation is already canceled" {
     try std.testing.expectError(Error.OperationCanceled, size_file);
 }
 
+const builtin = @import("builtin");
+const native_os = builtin.os.tag;
+
 test "expect equal Blake3 fileHash digest with fdHash digest" {
+    if (native_os == .windows) {
+        // POSIX fd API is not supported on Windows
+        return;
+    }
+
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

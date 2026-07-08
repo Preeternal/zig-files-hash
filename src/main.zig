@@ -1,7 +1,9 @@
 const std = @import("std");
-const builtin_mode = @import("builtin").mode;
+const builtin = @import("builtin");
 const zig_files_hash = @import("zig_files_hash");
 
+const builtin_mode = builtin.mode;
+const native_os = builtin.os.tag;
 const HashAlgorithm = zig_files_hash.HashAlgorithm;
 const max_digest_length = zig_files_hash.max_digest_length;
 const fileHash = zig_files_hash.fileHash;
@@ -44,16 +46,19 @@ fn run(al: std.mem.Allocator, init: std.process.Init) !void {
     const size = try fileHash(io, HashAlgorithm.BLAKE3, path, out_buf[0..], null);
     std.debug.print("BLAKE3 (public API file input) = {x}\n", .{out_buf[0..size]});
 
-    const openat = std.posix.openat;
-    const dir_fd = std.posix.AT.FDCWD;
-    const flags = std.posix.O{ .ACCMODE = .RDONLY };
-    const fd = try openat(dir_fd, path, flags, 0);
-    defer _ = std.c.close(fd);
+    // POSIX-only fd demo path.
+    if (native_os != .windows) {
+        const openat = std.posix.openat;
+        const dir_fd = std.posix.AT.FDCWD;
+        const flags = std.posix.O{ .ACCMODE = .RDONLY };
+        const fd = try openat(dir_fd, path, flags, 0);
+        defer _ = std.posix.system.close(fd);
 
-    var out_buf_fd: [max_digest_length]u8 = undefined;
+        var out_buf_fd: [max_digest_length]u8 = undefined;
 
-    const fd_size = try fdHash(HashAlgorithm.BLAKE3, fd, out_buf_fd[0..], null);
-    std.debug.print("BLAKE3 (public API FD input) = {x}\n", .{out_buf_fd[0..fd_size]});
+        const fd_size = try fdHash(HashAlgorithm.BLAKE3, fd, out_buf_fd[0..], null);
+        std.debug.print("BLAKE3 (public API FD input) = {x}\n", .{out_buf_fd[0..fd_size]});
+    }
 
     const size2 = try stringHash(HashAlgorithm.BLAKE3, "Hello, world!", out_buf[0..], null);
     std.debug.print("BLAKE3 (public API string input) = {x}\n", .{out_buf[0..size2]});
