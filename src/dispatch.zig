@@ -624,7 +624,7 @@ test "expect equal Blake3 fileHash digest with fdHash digest" {
     const dir_fd = std.posix.AT.FDCWD;
     const flags = std.posix.O{ .ACCMODE = .RDONLY };
     const fd = try openat(dir_fd, real_path, flags, 0);
-    defer _ = std.c.close(fd);
+    defer _ = std.posix.system.close(fd);
 
     var out_buf_fd: [max_digest_length]u8 = undefined;
 
