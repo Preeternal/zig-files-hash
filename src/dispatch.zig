@@ -1,5 +1,8 @@
 const std = @import("std");
 const algorithms = @import("algorithms.zig");
+const builtin = @import("builtin");
+
+const native_os = builtin.os.tag;
 
 const HashAlgorithm = algorithms.HashAlgorithm;
 const RuntimeHasher = algorithms.RuntimeHasher;
@@ -79,23 +82,43 @@ pub const Context = struct {
         return .{ .io = io };
     }
 
+    fn mmapHash(io: std.Io, file: std.Io.File, stream: *HashStream) !bool {
+        const stat = file.stat(io) catch return false;
+        if (stat.kind == .file and stat.size > 0 and native_os != .windows) {
+            const fd = file.handle;
+            const data = std.posix.mmap(null, //
+                stat.size, //
+                .{ .READ = true }, //
+                .{ .TYPE = .PRIVATE }, //
+                fd, 0) //
+                catch return false;
+            defer std.posix.munmap(data);
+            try stream.update(data);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
     pub fn fileHashInDir(self: *const Context, alg: HashAlgorithm, dir: std.Io.Dir, sub_path: []const u8, out: []u8, request: ?HashRequest) !usize {
         const io = self.io;
         var file = try dir.openFile(io, sub_path, .{});
         defer file.close(io);
 
-        // const fd = file.handle;
-
         var stream = try HashStream.init(alg, request);
 
-        var buf: [64 * 1024]u8 = undefined;
-        var file_reader = file.reader(io, &.{});
-        while (true) {
-            const n = try file_reader.interface.readSliceShort(buf[0..]);
-            if (n == 0) break;
+        const mapped = try mmapHash(io, file, &stream);
 
-            const chunk = buf[0..n];
-            try stream.update(chunk);
+        if (!mapped) {
+            var buf: [64 * 1024]u8 = undefined;
+            var file_reader = file.reader(io, &.{});
+            while (true) {
+                const n = try file_reader.interface.readSliceShort(buf[0..]);
+                if (n == 0) break;
+
+                const chunk = buf[0..n];
+                try stream.update(chunk);
+            }
         }
 
         return stream.final(out);
@@ -576,10 +599,7 @@ test "fileHash returns OperationCanceled when operation is already canceled" {
     try std.testing.expectError(Error.OperationCanceled, size_file);
 }
 
-const builtin = @import("builtin");
-const native_os = builtin.os.tag;
-
-test "expect equal Blake3 fileHash digest with fdHash digest" {
+test "BLAKE3 fdHash matches fileHash" {
     if (native_os == .windows) {
         // POSIX fd API is not supported on Windows
         return;
