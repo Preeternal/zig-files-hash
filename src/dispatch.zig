@@ -112,6 +112,25 @@ pub fn fileHash(io: std.Io, alg: HashAlgorithm, path: []const u8, out: []u8, req
     return fileHashInDir(io, alg, std.Io.Dir.cwd(), path, out, request);
 }
 
+pub fn fdHash(
+    alg: HashAlgorithm,
+    fd: std.posix.fd_t,
+    out: []u8,
+    request: ?HashRequest,
+) !usize {
+    const read = std.posix.read;
+    var stream = try HashStream.init(alg, request);
+    var buf: [64 * 1024]u8 = undefined;
+    while (true) {
+        const n = try read(fd, buf[0..]);
+        if (n == 0) break;
+        const chunk = buf[0..n];
+        try stream.update(chunk);
+    }
+
+    return stream.final(out);
+}
+
 pub fn stringHash(alg: HashAlgorithm, data: []const u8, out: []u8, request: ?HashRequest) !usize {
     var stream = try HashStream.init(alg, request);
     try stream.update(data);
@@ -553,6 +572,56 @@ test "fileHash returns OperationCanceled when operation is already canceled" {
         .operation = &operation,
     });
     try std.testing.expectError(Error.OperationCanceled, size_file);
+}
+
+test "expect equal Blake3 fileHash digest with fdHash digest" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const data = "Hello, world!";
+    const file_name = "test.bin";
+
+    {
+        const file = try tmp.dir.createFile(io, file_name, .{
+            .truncate = true,
+        });
+        defer file.close(io);
+        try file.writeStreamingAll(io, data);
+    }
+
+    var file = try tmp.dir.openFile(io, file_name, .{});
+    defer file.close(io);
+
+    var stream = try HashStream.init(HashAlgorithm.BLAKE3, null);
+    var buf: [64 * 1024]u8 = undefined;
+    var reader = file.reader(io, &.{});
+    while (true) {
+        const n = try reader.interface.readSliceShort(buf[0..]);
+        if (n == 0) break;
+
+        const chunk = buf[0..n];
+        try stream.update(chunk);
+    }
+
+    const digest = try stream.finalResult();
+    const bytes = digest.slice();
+
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const real_path_size = try tmp.dir.realPathFile(io, file_name, &path_buf);
+    const real_path = path_buf[0..real_path_size];
+
+    const openat = std.posix.openat;
+    const dir_fd = std.posix.AT.FDCWD;
+    const flags = std.posix.O{ .ACCMODE = .RDONLY };
+    const fd = try openat(dir_fd, real_path, flags, 0);
+    defer _ = std.c.close(fd);
+
+    var out_buf_fd: [max_digest_length]u8 = undefined;
+
+    const fd_size = try fdHash(HashAlgorithm.BLAKE3, fd, out_buf_fd[0..], null);
+    const fd_bytes = out_buf_fd[0..fd_size];
+
+    try std.testing.expectEqualSlices(u8, bytes, fd_bytes);
 }
 
 // test "fuzz example" {

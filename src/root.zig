@@ -16,6 +16,7 @@ pub const Operation = dispatch.Operation;
 pub const HashRequest = dispatch.HashRequest;
 pub const fileHashInDir = dispatch.fileHashInDir;
 pub const fileHash = dispatch.fileHash;
+pub const fdHash = dispatch.fdHash;
 pub const stringHash = dispatch.stringHash;
 
 pub const getDemoOptionsArray = dispatch.getDemoOptionsArray;

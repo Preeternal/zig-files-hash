@@ -6,6 +6,7 @@ const HashAlgorithm = zig_files_hash.HashAlgorithm;
 const max_digest_length = zig_files_hash.max_digest_length;
 const fileHash = zig_files_hash.fileHash;
 const stringHash = zig_files_hash.stringHash;
+const fdHash = zig_files_hash.fdHash;
 const Context = zig_files_hash.Context;
 const Operation = zig_files_hash.Operation;
 const getDemoOptionsArray = zig_files_hash.getDemoOptionsArray;
@@ -42,6 +43,17 @@ fn run(al: std.mem.Allocator, init: std.process.Init) !void {
 
     const size = try fileHash(io, HashAlgorithm.BLAKE3, path, out_buf[0..], null);
     std.debug.print("BLAKE3 (public API file input) = {x}\n", .{out_buf[0..size]});
+
+    const openat = std.posix.openat;
+    const dir_fd = std.posix.AT.FDCWD;
+    const flags = std.posix.O{ .ACCMODE = .RDONLY };
+    const fd = try openat(dir_fd, path, flags, 0);
+    defer _ = std.c.close(fd);
+
+    var out_buf_fd: [max_digest_length]u8 = undefined;
+
+    const fd_size = try fdHash(HashAlgorithm.BLAKE3, fd, out_buf_fd[0..], null);
+    std.debug.print("BLAKE3 (public API FD input) = {x}\n", .{out_buf_fd[0..fd_size]});
 
     const size2 = try stringHash(HashAlgorithm.BLAKE3, "Hello, world!", out_buf[0..], null);
     std.debug.print("BLAKE3 (public API string input) = {x}\n", .{out_buf[0..size2]});
