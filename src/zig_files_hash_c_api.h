@@ -105,8 +105,7 @@ zfh_error zfh_context_file_hash(
  * On success, writes digest bytes to out_ptr and length to *written_len_ptr.
  */
 #if !defined(_WIN32)
-zfh_error zfh_context_fd_hash(
-    zfh_context* ctx,
+zfh_error zfh_fd_hash(
     zfh_algorithm alg,
     int fd,
     const zfh_request* request_ptr,

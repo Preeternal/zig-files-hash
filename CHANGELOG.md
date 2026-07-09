@@ -1,19 +1,36 @@
 # Releases
 
-## v0.0.7 — C ABI v4: POSIX fd hashing and opt-in mmap
+## v0.0.7 — POSIX fd hashing and opt-in mmap fast path
 
 ### Highlights
 
-- C ABI version bumped to `ZFH_API_VERSION = 4`.
-- Added POSIX `zfh_context_fd_hash` for hashing an already-open file descriptor.
-- Added `ZFH_OPTION_USE_MMAP` for opt-in mmap hashing through
-  `zfh_context_file_hash`.
+- Added POSIX `fdHash` / `zfh_fd_hash` for wrappers that already have an open
+  file descriptor but do not have a usable filesystem path. This covers
+  Android `content://` providers, security-scoped or provider-backed URLs, and
+  other platform APIs that return an fd directly. The path API cannot represent
+  these sources reliably without copying them to a temporary file.
+- The fd API keeps the read loop inside Zig, avoids copying the source to a
+  temporary file or calling into Zig for every chunk, reads from the fd's
+  current position, and never closes it. It remains streaming and does not use
+  mmap.
+- Added an opt-in mmap fast path for `fileHash` / `fileHashInDir` and
+  `zfh_context_file_hash`. Enable it with Zig's `HashRequest.use_mmap` or the
+  C flag `ZFH_OPTION_USE_MMAP` when hashing a stable regular file.
+- mmap is disabled by default. It is a file-I/O optimization, not a different
+  hashing algorithm: the digest stays identical while the input is processed
+  through a memory mapping and 64 KiB chunks. Callers should benchmark their
+  workload before enabling it; local measurements were usually within a few
+  percent, ranging from slightly slower to about 20% faster. The file must not
+  be modified or truncated while it is being hashed.
 
 ### Compatibility notes
 
+- C ABI version is now `ZFH_API_VERSION = 4`.
 - `ZFH_OPTION_USE_MMAP` does not change the layout of `zfh_options`.
-- The fd API reads from the current descriptor position and never closes it.
-- mmap remains disabled by default and is not used by the fd API.
+- The mmap option affects path-based file hashing only; it is ignored by
+  `zfh_fd_hash` and the streaming hasher APIs.
+
+---
 
 ## v0.0.6 - Windows MSVC static C ABI link fix
 

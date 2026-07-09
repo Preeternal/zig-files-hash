@@ -80,7 +80,6 @@ pub fn fileHash(
 }
 
 pub fn fdHash(
-    ctx_ptr: ?*zfh_context,
     alg: zfh_algorithm,
     fd: c_int,
     request_ptr: ?*const zfh_request,
@@ -88,8 +87,6 @@ pub fn fdHash(
     out_len: usize,
     written_len_ptr: ?*usize,
 ) zfh_error {
-    const ctx = ctx_ptr orelse return .invalid_argument;
-    _ = ctx;
     const written_len = written_len_ptr orelse return .invalid_argument;
     written_len.* = 0;
 
@@ -175,7 +172,7 @@ test "c_api context: file hash supports mmap option" {
     try std.testing.expectEqualSlices(u8, out_read[0..read_written], out_mmap[0..mmap_written]);
 }
 
-test "c_api context: fd hash matches path hash" {
+test "c_api fd hash matches path hash" {
     if (builtin.os.tag == .windows) return;
 
     const io = std.testing.io;
@@ -196,19 +193,18 @@ test "c_api context: fd hash matches path hash" {
     const fd = try std.posix.openat(std.posix.AT.FDCWD, path, .{ .ACCMODE = .RDONLY }, 0);
     defer _ = std.posix.system.close(fd);
 
+    var out_fd: [zfh.max_digest_length]u8 = undefined;
+    var fd_written: usize = 0;
+    const fd_rc = fdHash(.sha_256, @intCast(fd), null, out_fd[0..].ptr, out_fd.len, &fd_written);
+    try std.testing.expectEqual(zfh_error.ok, fd_rc);
+
+    var out_path: [zfh.max_digest_length]u8 = undefined;
+    var path_written: usize = 0;
     var ctx_ptr: ?*zfh_context = null;
     try std.testing.expectEqual(zfh_error.ok, create(&ctx_ptr));
     defer if (ctx_ptr) |ctx| {
         _ = destroy(ctx);
     };
-
-    var out_fd: [zfh.max_digest_length]u8 = undefined;
-    var fd_written: usize = 0;
-    const fd_rc = fdHash(ctx_ptr, .sha_256, @intCast(fd), null, out_fd[0..].ptr, out_fd.len, &fd_written);
-    try std.testing.expectEqual(zfh_error.ok, fd_rc);
-
-    var out_path: [zfh.max_digest_length]u8 = undefined;
-    var path_written: usize = 0;
     const path_rc = fileHash(ctx_ptr, .sha_256, path.ptr, path.len, null, out_path[0..].ptr, out_path.len, &path_written);
     try std.testing.expectEqual(zfh_error.ok, path_rc);
     try std.testing.expectEqual(path_written, fd_written);

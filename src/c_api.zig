@@ -138,8 +138,7 @@ pub export fn zfh_context_file_hash(
 /// The descriptor is read from its current position and is never closed.
 /// `ZFH_OPTION_USE_MMAP` is ignored for this API; mmap applies only to path
 /// based file hashing.
-pub export fn zfh_context_fd_hash(
-    ctx_ptr: ?*zfh_context,
+pub export fn zfh_fd_hash(
     alg: zfh_algorithm,
     fd: c_int,
     request_ptr: ?*const zfh_request,
@@ -148,7 +147,6 @@ pub export fn zfh_context_fd_hash(
     written_len_ptr: ?*usize,
 ) zfh_error {
     return context.fdHash(
-        ctx_ptr,
         alg,
         fd,
         request_ptr,

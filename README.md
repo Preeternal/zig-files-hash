@@ -354,7 +354,7 @@ zfh_error zfh_string_hash(...);
 zfh_error zfh_context_create(zfh_context **out_ctx);
 zfh_error zfh_context_destroy(zfh_context *ctx);
 zfh_error zfh_context_file_hash(...);
-zfh_error zfh_context_fd_hash(...); /* POSIX only */
+zfh_error zfh_fd_hash(...); /* POSIX only */
 
 size_t zfh_operation_state_size(void);
 size_t zfh_operation_state_align(void);
@@ -426,7 +426,7 @@ zfh_request req = {
 zfh_operation_cancel(op_ptr, op_size);
 ```
 
-`zfh_string_hash`, `zfh_context_file_hash`, `zfh_context_fd_hash`, `zfh_hasher_update`, and
+`zfh_string_hash`, `zfh_context_file_hash`, `zfh_fd_hash`, `zfh_hasher_update`, and
 `zfh_hasher_final` can return `ZFH_OPERATION_CANCELED` when the operation is
 canceled.
 
@@ -458,7 +458,7 @@ required.
 Set `ZFH_OPTION_USE_MMAP` in `zfh_options.flags` to opt into mmap for this path
 API. It is disabled by default and should be used only for stable regular files
 after benchmarking the workload. The option is ignored by
-`zfh_context_fd_hash`, which always reads from the current fd position.
+`zfh_fd_hash`, which always reads from the current fd position.
 
 ### C file-descriptor hashing
 
@@ -466,8 +466,7 @@ On POSIX platforms, callers that already own an open descriptor can avoid
 duplicating the read loop in C or a wrapper:
 
 ```c
-zfh_context_fd_hash(
-    ctx,
+zfh_fd_hash(
     ZFH_ALG_SHA_256,
     fd,
     request_ptr,
@@ -478,7 +477,7 @@ zfh_context_fd_hash(
 ```
 
 The function reads from the descriptor's current position, does not close it,
-and hashes the input in chunks. `zfh_context_fd_hash` does not use mmap.
+and hashes the input in chunks. `zfh_fd_hash` does not use mmap.
 
 ### C streaming contract
 
