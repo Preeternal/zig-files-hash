@@ -92,7 +92,19 @@ pub fn fileHashInDir(
     out: []u8,
     request: ?HashRequest,
 ) !usize
+
+// POSIX only.
+pub fn fdHash(
+    alg: HashAlgorithm,
+    fd: std.posix.fd_t,
+    out: []u8,
+    request: ?HashRequest,
+) !usize
 ```
+
+`fdHash` is POSIX-only. Use it when the caller already owns an open file
+descriptor and cannot reliably provide a filesystem path. It reads from the
+current fd position, keeps the read loop inside Zig, and does not close the fd.
 
 `Context` stores a reusable `std.Io` value:
 
@@ -215,8 +227,8 @@ Rules:
 - If `operation` was canceled: `error.OperationCanceled`
 - If a `HashStream` is used after finalization: `error.InvalidState`
 
-`fileHash` / `fileHashInDir` return library errors plus filesystem/OS errors
-from opening and reading files. The exact filesystem error set is
+`fileHash` / `fileHashInDir` / `fdHash` return library errors plus filesystem/OS
+errors from opening and reading files. The exact filesystem error set is
 platform-dependent.
 
 ## Output format
@@ -261,6 +273,34 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("BLAKE3 = {x}\n", .{out[0..len]});
 }
 ```
+
+### Hash an open file descriptor
+
+`fdHash` is POSIX-only. Use it when a platform API already returned an open fd,
+for example for an Android `content://` provider or a provider-backed URL that
+cannot be represented as a regular filesystem path.
+
+```zig
+const std = @import("std");
+const zfh = @import("zig_files_hash");
+
+pub fn main() !void {
+    const fd = try std.posix.openat(
+        std.posix.AT.FDCWD,
+        "file.bin",
+        .{ .ACCMODE = .RDONLY },
+        0,
+    );
+    defer _ = std.posix.system.close(fd);
+
+    var out: [zfh.max_digest_length]u8 = undefined;
+    const len = try zfh.fdHash(.BLAKE3, fd, out[0..], null);
+    std.debug.print("BLAKE3 = {x}\n", .{out[0..len]});
+}
+```
+
+The function reads from the descriptor's current position, does not close it,
+and hashes the input in chunks.
 
 ### Hash file in opened directory
 
@@ -395,7 +435,7 @@ Use flags:
 
 - `ZFH_OPTION_HAS_SEED`
 - `ZFH_OPTION_HAS_KEY`
-- `ZFH_OPTION_USE_MMAP` (only for `zfh_context_file_hash`)
+- `ZFH_OPTION_USE_MMAP` for path-based file hashing
 
 Set `struct_size` with `ZFH_OPTIONS_STRUCT_SIZE` and
 `ZFH_REQUEST_STRUCT_SIZE`. If no options or cancellation are needed, pass
@@ -457,8 +497,7 @@ required.
 
 Set `ZFH_OPTION_USE_MMAP` in `zfh_options.flags` to opt into mmap for this path
 API. It is disabled by default and should be used only for stable regular files
-after benchmarking the workload. The option is ignored by
-`zfh_fd_hash`, which always reads from the current fd position.
+after benchmarking the workload.
 
 ### C file-descriptor hashing
 
@@ -477,7 +516,7 @@ zfh_fd_hash(
 ```
 
 The function reads from the descriptor's current position, does not close it,
-and hashes the input in chunks. `zfh_fd_hash` does not use mmap.
+and hashes the input in chunks.
 
 ### C streaming contract
 
