@@ -9,23 +9,28 @@ const Operation = zfh.Operation;
 const zfh_options = types.zfh_options;
 const zfh_request = types.zfh_request;
 
-pub fn parseOptions(options_ptr: ?*const zfh_options) !?HashOptions {
+const ParsedOptions = struct {
+    hash_options: ?HashOptions,
+    use_mmap: bool,
+};
+
+pub fn parseOptions(options_ptr: ?*const zfh_options) !?ParsedOptions {
     const c_opts = options_ptr orelse return null;
     if (c_opts.struct_size < @as(u32, @intCast(@sizeOf(zfh_options)))) {
         return error.InvalidArgument;
     }
 
-    const known_flags = types.ZFH_OPTION_HAS_SEED | types.ZFH_OPTION_HAS_KEY;
+    const known_flags = types.ZFH_OPTION_HAS_SEED | types.ZFH_OPTION_HAS_KEY | types.ZFH_OPTION_USE_MMAP;
     if ((c_opts.flags & ~known_flags) != 0) {
         return error.InvalidArgument;
     }
 
     var opts: HashOptions = .{};
-    var has_any = false;
+    var has_hash_options = false;
 
     if ((c_opts.flags & types.ZFH_OPTION_HAS_SEED) != 0) {
         opts.seed = c_opts.seed;
-        has_any = true;
+        has_hash_options = true;
     }
 
     if ((c_opts.flags & types.ZFH_OPTION_HAS_KEY) != 0) {
@@ -35,10 +40,13 @@ pub fn parseOptions(options_ptr: ?*const zfh_options) !?HashOptions {
         };
 
         opts.key = key;
-        has_any = true;
+        has_hash_options = true;
     }
 
-    return if (has_any) opts else null;
+    return .{
+        .hash_options = if (has_hash_options) opts else null,
+        .use_mmap = (c_opts.flags & types.ZFH_OPTION_USE_MMAP) != 0,
+    };
 }
 
 pub fn parseRequest(request_ptr: ?*const zfh_request) !?HashRequest {
@@ -55,9 +63,18 @@ pub fn parseRequest(request_ptr: ?*const zfh_request) !?HashRequest {
         break :blk null;
     };
 
+    var parsed_options: ParsedOptions = .{
+        .hash_options = null,
+        .use_mmap = false,
+    };
+    if (try parseOptions(c_request.options_ptr)) |options| {
+        parsed_options = options;
+    }
+
     return HashRequest{
-        .hash_options = try parseOptions(c_request.options_ptr),
+        .hash_options = parsed_options.hash_options,
         .operation = parsed_operation,
+        .use_mmap = parsed_options.use_mmap,
     };
 }
 
@@ -73,7 +90,18 @@ test "c_api request: parses options" {
     };
 
     const parsed = (try parseOptions(&options)).?;
-    try std.testing.expectEqual(@as(u64, 12345), parsed.seed.?);
+    try std.testing.expectEqual(@as(u64, 12345), parsed.hash_options.?.seed.?);
+}
+
+test "c_api request: parses mmap option" {
+    var options = zfh_options{
+        .struct_size = @sizeOf(zfh_options),
+        .flags = types.ZFH_OPTION_USE_MMAP,
+    };
+
+    const parsed = (try parseOptions(&options)).?;
+    try std.testing.expect(parsed.hash_options == null);
+    try std.testing.expect(parsed.use_mmap);
 }
 
 test "c_api request: rejects invalid options struct size" {

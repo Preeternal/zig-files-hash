@@ -1,5 +1,20 @@
 # Releases
 
+## v0.0.7 — C ABI v4: POSIX fd hashing and opt-in mmap
+
+### Highlights
+
+- C ABI version bumped to `ZFH_API_VERSION = 4`.
+- Added POSIX `zfh_context_fd_hash` for hashing an already-open file descriptor.
+- Added `ZFH_OPTION_USE_MMAP` for opt-in mmap hashing through
+  `zfh_context_file_hash`.
+
+### Compatibility notes
+
+- `ZFH_OPTION_USE_MMAP` does not change the layout of `zfh_options`.
+- The fd API reads from the current descriptor position and never closes it.
+- mmap remains disabled by default and is not used by the fd API.
+
 ## v0.0.6 - Windows MSVC static C ABI link fix
 
 Patch release for Windows C ABI static library consumers.

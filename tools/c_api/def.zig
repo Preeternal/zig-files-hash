@@ -3,7 +3,7 @@
 //! The generator derives algorithms from `zfh.HashAlgorithm` and library errors
 //! from `zfh.Error`. Keep only non-library ABI policy here.
 
-pub const api_version: u32 = 3;
+pub const api_version: u32 = 4;
 
 pub const ExtraErrorDef = struct {
     zig_name: []const u8,
@@ -34,4 +34,5 @@ pub const OptionFlagDef = struct {
 pub const option_flags = [_]OptionFlagDef{
     .{ .zig_name = "ZFH_OPTION_HAS_SEED", .c_name = "ZFH_OPTION_HAS_SEED", .expr = "1 << 0" },
     .{ .zig_name = "ZFH_OPTION_HAS_KEY", .c_name = "ZFH_OPTION_HAS_KEY", .expr = "1 << 1" },
+    .{ .zig_name = "ZFH_OPTION_USE_MMAP", .c_name = "ZFH_OPTION_USE_MMAP", .expr = "1 << 2" },
 };

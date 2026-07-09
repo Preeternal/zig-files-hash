@@ -7,7 +7,7 @@ I/O, cancellable hash requests, and an optional C ABI.
 
 - Pre-1.0 API may change.
 - Minimum Zig version: `0.16.0` (`build.zig.zon`).
-- Current C ABI version: `ZFH_API_VERSION = 3`.
+- Current C ABI version: `ZFH_API_VERSION = 4`.
 
 ## Features
 
@@ -20,6 +20,7 @@ I/O, cancellable hash requests, and an optional C ABI.
 - Optional C ABI for native/FFI integrations
 - Cooperative cancellation through `Operation`
 - Keyed/seeded modes where applicable
+- Optional mmap fast path for stable regular files
 
 ## Installation
 
@@ -353,6 +354,7 @@ zfh_error zfh_string_hash(...);
 zfh_error zfh_context_create(zfh_context **out_ctx);
 zfh_error zfh_context_destroy(zfh_context *ctx);
 zfh_error zfh_context_file_hash(...);
+zfh_error zfh_context_fd_hash(...); /* POSIX only */
 
 size_t zfh_operation_state_size(void);
 size_t zfh_operation_state_align(void);
@@ -393,6 +395,7 @@ Use flags:
 
 - `ZFH_OPTION_HAS_SEED`
 - `ZFH_OPTION_HAS_KEY`
+- `ZFH_OPTION_USE_MMAP` (only for `zfh_context_file_hash`)
 
 Set `struct_size` with `ZFH_OPTIONS_STRUCT_SIZE` and
 `ZFH_REQUEST_STRUCT_SIZE`. If no options or cancellation are needed, pass
@@ -423,7 +426,7 @@ zfh_request req = {
 zfh_operation_cancel(op_ptr, op_size);
 ```
 
-`zfh_string_hash`, `zfh_context_file_hash`, `zfh_hasher_update`, and
+`zfh_string_hash`, `zfh_context_file_hash`, `zfh_context_fd_hash`, `zfh_hasher_update`, and
 `zfh_hasher_final` can return `ZFH_OPERATION_CANCELED` when the operation is
 canceled.
 
@@ -451,6 +454,31 @@ zfh_context_destroy(ctx);
 
 `path_ptr` is byte data with explicit `path_len`; null-termination is not
 required.
+
+Set `ZFH_OPTION_USE_MMAP` in `zfh_options.flags` to opt into mmap for this path
+API. It is disabled by default and should be used only for stable regular files
+after benchmarking the workload. The option is ignored by
+`zfh_context_fd_hash`, which always reads from the current fd position.
+
+### C file-descriptor hashing
+
+On POSIX platforms, callers that already own an open descriptor can avoid
+duplicating the read loop in C or a wrapper:
+
+```c
+zfh_context_fd_hash(
+    ctx,
+    ZFH_ALG_SHA_256,
+    fd,
+    request_ptr,
+    out_ptr,
+    out_len,
+    &written_len
+);
+```
+
+The function reads from the descriptor's current position, does not close it,
+and hashes the input in chunks. `zfh_context_fd_hash` does not use mmap.
 
 ### C streaming contract
 

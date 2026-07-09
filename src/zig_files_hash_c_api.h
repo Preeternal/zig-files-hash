@@ -15,7 +15,7 @@ typedef struct zfh_context zfh_context;
 typedef struct zfh_options {
     /* Must be set to ZFH_OPTIONS_STRUCT_SIZE, i.e. sizeof(zfh_options). */
     uint32_t struct_size;
-    /* Bitmask of ZFH_OPTION_HAS_* values. Unknown flags are rejected. */
+    /* Bitmask of ZFH_OPTION_* values. Unknown flags are rejected. */
     uint32_t flags;
     /* Currently used by XXH3 when ZFH_OPTION_HAS_SEED is set. */
     uint64_t seed;
@@ -97,6 +97,24 @@ zfh_error zfh_context_file_hash(
     size_t out_len,
     size_t* written_len_ptr
 );
+
+/* POSIX-only API for callers that already own an open file descriptor.
+ * Reads from the descriptor's current position and never closes it.
+ * ZFH_OPTION_USE_MMAP is ignored for this API; mmap applies only to
+ * zfh_context_file_hash.
+ * On success, writes digest bytes to out_ptr and length to *written_len_ptr.
+ */
+#if !defined(_WIN32)
+zfh_error zfh_context_fd_hash(
+    zfh_context* ctx,
+    zfh_algorithm alg,
+    int fd,
+    const zfh_request* request_ptr,
+    uint8_t* out_ptr,
+    size_t out_len,
+    size_t* written_len_ptr
+);
+#endif
 
 /* Size/alignment requirements for caller-provided streaming state buffer. */
 size_t zfh_hasher_state_size(void);

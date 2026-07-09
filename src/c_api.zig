@@ -17,6 +17,7 @@ pub const zfh_error = types.zfh_error;
 pub const zfh_algorithm = types.zfh_algorithm;
 pub const ZFH_OPTION_HAS_SEED = types.ZFH_OPTION_HAS_SEED;
 pub const ZFH_OPTION_HAS_KEY = types.ZFH_OPTION_HAS_KEY;
+pub const ZFH_OPTION_USE_MMAP = types.ZFH_OPTION_USE_MMAP;
 pub const zfh_options = types.zfh_options;
 pub const zfh_request = types.zfh_request;
 pub const zfh_context = context.zfh_context;
@@ -126,6 +127,30 @@ pub export fn zfh_context_file_hash(
         alg,
         path_ptr,
         path_len,
+        request_ptr,
+        out_ptr,
+        out_len,
+        written_len_ptr,
+    );
+}
+
+/// Convenience file-descriptor hashing API for POSIX callers.
+/// The descriptor is read from its current position and is never closed.
+/// `ZFH_OPTION_USE_MMAP` is ignored for this API; mmap applies only to path
+/// based file hashing.
+pub export fn zfh_context_fd_hash(
+    ctx_ptr: ?*zfh_context,
+    alg: zfh_algorithm,
+    fd: c_int,
+    request_ptr: ?*const zfh_request,
+    out_ptr: ?[*]u8,
+    out_len: usize,
+    written_len_ptr: ?*usize,
+) zfh_error {
+    return context.fdHash(
+        ctx_ptr,
+        alg,
+        fd,
         request_ptr,
         out_ptr,
         out_len,

@@ -5,6 +5,7 @@ pub const zfh_error = generated.zfh_error;
 pub const zfh_algorithm = generated.zfh_algorithm;
 pub const ZFH_OPTION_HAS_SEED = generated.ZFH_OPTION_HAS_SEED;
 pub const ZFH_OPTION_HAS_KEY = generated.ZFH_OPTION_HAS_KEY;
+pub const ZFH_OPTION_USE_MMAP = generated.ZFH_OPTION_USE_MMAP;
 
 pub const zfh_options = extern struct {
     struct_size: u32 = @sizeOf(@This()),
