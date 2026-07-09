@@ -6,13 +6,14 @@
 
 - Added POSIX `fdHash` / `zfh_fd_hash` for wrappers that already have an open
   file descriptor but do not have a usable filesystem path. This covers
-  Android `content://` providers, security-scoped or provider-backed URLs, and
-  other platform APIs that return an fd directly. The path API cannot represent
-  these sources reliably without copying them to a temporary file.
+  Android `content://` providers, security-scoped URLs, provider-backed URLs,
+  and other platform APIs that expose files only as file descriptors. The path
+  API cannot represent these sources reliably without copying them to a
+  temporary file.
 - The fd API keeps the read loop inside Zig, avoids copying the source to a
-  temporary file or calling into Zig for every chunk, reads from the fd's
-  current position, and never closes it. It remains streaming and does not use
-  mmap.
+  temporary file or calling into Zig for every chunk, reads from the file
+  descriptor's current position, and never closes it. It remains a streaming
+  implementation and intentionally does not use mmap.
 - Added an opt-in mmap fast path for `fileHash` / `fileHashInDir` and
   `zfh_context_file_hash`. Enable it with Zig's `HashRequest.use_mmap` or the
   C flag `ZFH_OPTION_USE_MMAP` when hashing a stable regular file.
@@ -20,8 +21,8 @@
   hashing algorithm: the digest stays identical while the input is processed
   through a memory mapping and 64 KiB chunks. Callers should benchmark their
   workload before enabling it; local measurements were usually within a few
-  percent, ranging from slightly slower to about 20% faster. The file must not
-  be modified or truncated while it is being hashed.
+  percent, ranging from slightly slower to about 20% faster. The mapped file
+  must not be modified or truncated while it is being hashed.
 
 ### Compatibility notes
 
