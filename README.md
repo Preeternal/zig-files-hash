@@ -165,11 +165,18 @@ pub const HashOptions = struct {
 pub const HashRequest = struct {
     hash_options: ?HashOptions = null,
     operation: ?*const Operation = null,
+    use_mmap: bool = false,
 };
 ```
 
-`hash_options` affects the digest. `operation` affects execution only and is
-used for cooperative cancellation.
+`hash_options` affects the digest
+
+`operation` affects execution only and is used for cooperative cancellation.
+
+`use_mmap` only changes file I/O for `fileHash` / `fileHashInDir`. It is off by
+default; enable it only for stable regular files after benchmarking your
+workload and accepting mmap-specific risks. Local benchmarks ranged from
+slightly slower to about 20% faster, usually only a few percent.
 
 ```zig
 var op = zfh.Operation.init();

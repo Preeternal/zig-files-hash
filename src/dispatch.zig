@@ -40,7 +40,11 @@ pub fn checkOperationCanceled(operation: ?*const Operation) !void {
     }
 }
 
-pub const HashRequest = struct { hash_options: ?HashOptions = null, operation: ?*const Operation = null };
+pub const HashRequest = struct {
+    hash_options: ?HashOptions = null,
+    operation: ?*const Operation = null,
+    use_mmap: bool = false,
+};
 
 pub const HashStream = struct {
     hasher: RuntimeHasher,
@@ -86,14 +90,23 @@ pub const Context = struct {
         const stat = file.stat(io) catch return false;
         if (stat.kind == .file and stat.size > 0 and native_os != .windows) {
             const fd = file.handle;
-            const data = std.posix.mmap(null, //
+            const data = std.posix.mmap( //
+                null, //
                 stat.size, //
                 .{ .READ = true }, //
                 .{ .TYPE = .PRIVATE }, //
                 fd, 0) //
                 catch return false;
             defer std.posix.munmap(data);
-            try stream.update(data);
+            std.posix.madvise(data.ptr, data.len, std.posix.MADV.SEQUENTIAL) catch {};
+            const chunk_size: usize = 64 * 1024;
+            var offset: usize = 0;
+            while (offset < data.len) {
+                const end: usize = @min(offset + chunk_size, data.len);
+                const chunk = data[offset..end];
+                offset = end;
+                try stream.update(chunk);
+            }
             return true;
         } else {
             return false;
@@ -107,7 +120,9 @@ pub const Context = struct {
 
         var stream = try HashStream.init(alg, request);
 
-        const mapped = try mmapHash(io, file, &stream);
+        const r = request orelse HashRequest{};
+
+        const mapped = if (r.use_mmap == true) try mmapHash(io, file, &stream) else false;
 
         if (!mapped) {
             var buf: [64 * 1024]u8 = undefined;

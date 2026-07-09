@@ -5,6 +5,7 @@ const zig_files_hash = @import("zig_files_hash");
 const builtin_mode = builtin.mode;
 const native_os = builtin.os.tag;
 const HashAlgorithm = zig_files_hash.HashAlgorithm;
+const HashOptions = zig_files_hash.HashOptions;
 const max_digest_length = zig_files_hash.max_digest_length;
 const fileHash = zig_files_hash.fileHash;
 const stringHash = zig_files_hash.stringHash;
@@ -70,12 +71,15 @@ pub fn demoAllAlgorithms(io: std.Io, path: []const u8) !void {
         const options_array = getDemoOptionsArray(alg);
         const context = Context.init(io);
         for (options_array, 0..) |options, i| {
+            const start = std.Io.Clock.awake.now(io);
             var out_buf: [max_digest_length]u8 = undefined;
             var operation = Operation.init();
-            const size = try context.fileHash(alg, path, out_buf[0..], .{ .hash_options = options, .operation = &operation });
+            const size = try context.fileHash(alg, path, out_buf[0..], .{ .hash_options = options, .operation = &operation, .use_mmap = false });
             const hash_slice = out_buf[0..size];
             const suffix = if (alg == HashAlgorithm.BLAKE3 and i == 1) "-KEYED" else if (alg == HashAlgorithm.@"XXH3-64" and i == 1) "-SEEDED" else "";
-            std.debug.print("{s}{s} = {x}\n", .{ @tagName(alg), suffix, hash_slice });
+            const elapsed = start.untilNow(io, .awake);
+            const ms = elapsed.toMilliseconds();
+            std.debug.print("{s}{s} = {x}, - {}ms\n", .{ @tagName(alg), suffix, hash_slice, ms });
         }
     }
 }
