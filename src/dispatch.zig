@@ -88,11 +88,11 @@ pub const Context = struct {
 
     fn mmapHash(io: std.Io, file: std.Io.File, stream: *HashStream) !bool {
         const stat = file.stat(io) catch return false;
-        if (stat.kind == .file and stat.size > 0 and native_os != .windows) {
+        if (stat.kind == .file and stat.size > 0 and stat.size <= std.math.maxInt(usize) and native_os != .windows) {
             const fd = file.handle;
             const data = std.posix.mmap( //
                 null, //
-                stat.size, //
+                @intCast(stat.size), //
                 .{ .READ = true }, //
                 .{ .TYPE = .PRIVATE }, //
                 fd, 0) //
