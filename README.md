@@ -1,5 +1,7 @@
 # zig-files-hash
 
+[![Patreon](https://img.shields.io/endpoint?url=https%3A%2F%2Fshieldsio-patreon.vercel.app%2Fapi%2F%3Fusername%3Dpreeternal%26type%3Dpatrons)](https://www.patreon.com/preeternal)
+
 Small hashing library in Zig with a runtime algorithm enum, explicit Zig 0.16
 I/O, cancellable hash requests, and an optional C ABI.
 
