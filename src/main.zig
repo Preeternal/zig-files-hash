@@ -17,7 +17,7 @@ const getDemoOptionsArray = zig_files_hash.getDemoOptionsArray;
 pub fn main(init: std.process.Init) !void {
     std.debug.print("Running in {s} mode\n", .{@tagName(builtin_mode)});
 
-    if (builtin_mode == .Debug) {
+    if (builtin_mode == .debug) {
         var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
         defer _ = debug_allocator.deinit();
 
@@ -66,8 +66,8 @@ fn run(al: std.mem.Allocator, init: std.process.Init) !void {
 }
 
 pub fn demoAllAlgorithms(io: std.Io, path: []const u8) !void {
-    inline for (@typeInfo(HashAlgorithm).@"enum".fields) |field| {
-        const alg: HashAlgorithm = @enumFromInt(field.value);
+    inline for (@typeInfo(HashAlgorithm).@"enum".field_values) |field_value| {
+        const alg: HashAlgorithm = @fromBackingInt(@intCast(field_value));
         const options_array = getDemoOptionsArray(alg);
         const context = Context.init(io);
         for (options_array, 0..) |options, i| {

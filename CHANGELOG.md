@@ -1,5 +1,13 @@
 # Releases
 
+## v0.0.8 — Zig 0.17
+
+- Minimum Zig version raised to `0.17.0`; updated reflection, CLI build setup,
+  and C API generation for the new compiler.
+- C ABI remains `ZFH_API_VERSION = 4`; existing C/FFI bindings need no changes.
+
+---
+
 ## v0.0.7 — POSIX fd hashing and opt-in mmap fast path
 
 ### Highlights

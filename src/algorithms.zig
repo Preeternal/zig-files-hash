@@ -51,15 +51,13 @@ pub const RuntimeHasher = union(HashAlgorithm) {
     @"HMAC-SHA-1": HmacSha1,
 
     pub fn init(alg: HashAlgorithm, options: ?HashOptions) !RuntimeHasher {
-        const fields = @typeInfo(RuntimeHasher).@"union".fields;
-
-        inline for (fields) |field| {
-            const tag = @field(HashAlgorithm, field.name);
+        inline for (runtime_hasher_union.field_names, runtime_hasher_union.field_types) |field_name, field_type| {
+            const tag = @field(HashAlgorithm, field_name);
 
             if (alg == tag) {
-                const H = field.type;
+                const H = field_type;
                 const hasher = try H.init(options);
-                return @unionInit(RuntimeHasher, field.name, hasher);
+                return @unionInit(RuntimeHasher, field_name, hasher);
             }
         }
 
@@ -111,24 +109,24 @@ pub const RuntimeHasher = union(HashAlgorithm) {
     }
 };
 
-const hash_algorithm_enum_fields = @typeInfo(HashAlgorithm).@"enum".fields;
-pub const runtime_hasher_union_fields = @typeInfo(RuntimeHasher).@"union".fields;
+const hash_algorithm_enum_field_names = @typeInfo(HashAlgorithm).@"enum".field_names;
+pub const runtime_hasher_union = @typeInfo(RuntimeHasher).@"union";
 
 comptime {
-    if (hash_algorithm_enum_fields.len != runtime_hasher_union_fields.len) {
+    if (hash_algorithm_enum_field_names.len != runtime_hasher_union.field_names.len) {
         @compileError("RuntimeHasher variants must match HashAlgorithm enum size");
     }
 }
 
 comptime {
-    var seen: [hash_algorithm_enum_fields.len]bool = .{false} ** hash_algorithm_enum_fields.len;
+    var seen: [hash_algorithm_enum_field_names.len]bool = @splat(false);
 
-    for (runtime_hasher_union_fields) |field| {
-        const tag = @field(HashAlgorithm, field.name);
-        const idx = @intFromEnum(tag);
+    for (runtime_hasher_union.field_names) |field_name| {
+        const tag = @field(HashAlgorithm, field_name);
+        const idx = @backingInt(tag);
 
         if (seen[idx]) {
-            @compileError("Duplicate tag in RuntimeHasher: " ++ field.name);
+            @compileError("Duplicate tag in RuntimeHasher: " ++ field_name);
         }
 
         seen[idx] = true;
@@ -136,7 +134,7 @@ comptime {
 
     for (seen, 0..) |ok, i| {
         if (!ok) {
-            @compileError("Missing RuntimeHasher variant for HashAlgorithm: " ++ hash_algorithm_enum_fields[i].name);
+            @compileError("Missing RuntimeHasher variant for HashAlgorithm: " ++ hash_algorithm_enum_field_names[i]);
         }
     }
 }
@@ -152,8 +150,8 @@ fn digestLengthBytes(comptime H: type) usize {
 pub const max_digest_length = blk: {
     var max: usize = 0;
 
-    for (runtime_hasher_union_fields) |field| {
-        const H = field.type;
+    for (runtime_hasher_union.field_types) |field_type| {
+        const H = field_type;
         const len = digestLengthBytes(H);
         if (len > max) {
             max = len;
@@ -170,9 +168,9 @@ comptime {
 }
 
 pub fn digestLength(alg: HashAlgorithm) usize {
-    inline for (runtime_hasher_union_fields) |field| {
-        const H = field.type;
-        const tag = @field(HashAlgorithm, field.name);
+    inline for (runtime_hasher_union.field_types, runtime_hasher_union.field_names) |field_type, field_name| {
+        const H = field_type;
+        const tag = @field(HashAlgorithm, field_name);
         if (alg == tag) {
             return digestLengthBytes(H);
         }
@@ -344,8 +342,8 @@ const HmacMd5 = Hmac(std.crypto.auth.hmac.HmacMd5);
 const HmacSha1 = Hmac(std.crypto.auth.hmac.HmacSha1);
 
 test "key is required for HMAC algorithms" {
-    inline for (runtime_hasher_union_fields) |field| {
-        const H = field.type;
+    inline for (runtime_hasher_union.field_types) |field_type| {
+        const H = field_type;
         switch (H) {
             HmacSha224, HmacSha256, HmacSha384, HmacSha512, HmacMd5, HmacSha1 => {
                 try std.testing.expectError(Error.KeyRequired, H.init(null));
@@ -450,9 +448,9 @@ test "Blake3 rejects key with invalid length" {
 }
 
 test "RuntimeHasher.digestLength matches digest size for each algorithm" {
-    inline for (runtime_hasher_union_fields) |field| {
-        const H = field.type;
-        const alg = @field(HashAlgorithm, field.name);
+    inline for (runtime_hasher_union.field_types, runtime_hasher_union.field_names) |field_type, field_name| {
+        const H = field_type;
+        const alg = @field(HashAlgorithm, field_name);
         const expected_len = digestLengthBytes(H);
 
         const options: ?HashOptions = switch (H) {

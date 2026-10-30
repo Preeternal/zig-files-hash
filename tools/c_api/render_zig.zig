@@ -23,6 +23,7 @@ pub fn render(w: *std.Io.Writer) !void {
     try renderErrorMessage(w);
     try renderMapLibraryError(w);
 }
+const error_names = @typeInfo(zfh.Error).error_set.error_names;
 
 fn renderZigErrorEnum(w: *std.Io.Writer) !void {
     try w.writeAll("pub const zfh_error = enum(c_int) {\n");
@@ -31,25 +32,29 @@ fn renderZigErrorEnum(w: *std.Io.Writer) !void {
         try w.print("    {s} = {d},\n", .{ entry.zig_name, value });
     }
 
-    inline for (std.meta.fields(zfh.Error), 0..) |field, i| {
-        try w.writeAll("    ");
-        try writeSnake(w, field.name, .lower, .camel);
-        try w.print(" = {d},\n", .{def.error_prefix.len + i});
-    }
+    if (error_names) |names| {
+        inline for (names, 0..) |name, i| {
+            try w.writeAll("    ");
+            try writeSnake(w, name, .lower, .camel);
+            try w.print(" = {d},\n", .{def.error_prefix.len + i});
+        }
 
-    const suffix_offset = def.error_prefix.len + std.meta.fields(zfh.Error).len;
-    for (def.error_suffix, 0..) |entry, i| {
-        try w.print("    {s} = {d},\n", .{ entry.zig_name, suffix_offset + i });
+        const suffix_offset = def.error_prefix.len + names.len;
+        for (def.error_suffix, 0..) |entry, i| {
+            try w.print("    {s} = {d},\n", .{ entry.zig_name, suffix_offset + i });
+        }
     }
 
     try w.writeAll("    _,\n};\n\n");
 }
 
+const alg_names = @typeInfo(zfh.HashAlgorithm).@"enum".field_names;
+
 fn renderZigAlgorithmEnum(w: *std.Io.Writer) !void {
     try w.writeAll("pub const zfh_algorithm = enum(c_int) {\n");
-    inline for (std.meta.fields(zfh.HashAlgorithm), 0..) |field, value| {
+    inline for (alg_names, 0..) |name, value| {
         try w.writeAll("    ");
-        try writeSnake(w, field.name, .lower, .separators);
+        try writeSnake(w, name, .lower, .separators);
         try w.print(" = {d},\n", .{value});
     }
     try w.writeAll("    _,\n};\n\n");
@@ -68,10 +73,10 @@ fn renderToHashAlgorithm(w: *std.Io.Writer) !void {
         \\    return switch (alg) {
         \\
     );
-    inline for (std.meta.fields(zfh.HashAlgorithm)) |field| {
+    inline for (alg_names) |name| {
         try w.writeAll("        .");
-        try writeSnake(w, field.name, .lower, .separators);
-        try w.print(" => .{f},\n", .{std.zig.fmtId(field.name)});
+        try writeSnake(w, name, .lower, .separators);
+        try w.print(" => .{f},\n", .{std.zig.fmtId(name)});
     }
     try w.writeAll(
         \\        else => null,
@@ -93,12 +98,14 @@ fn renderErrorMessage(w: *std.Io.Writer) !void {
         try renderZigErrorMessageCase(w, entry.zig_name, entry.message);
     }
 
-    inline for (std.meta.fields(zfh.Error)) |field| {
-        try w.writeAll("        .");
-        try writeSnake(w, field.name, .lower, .camel);
-        try w.writeAll(" => \"");
-        try writeMessageFromCamel(w, field.name);
-        try w.writeAll("\",\n");
+    if (error_names) |names| {
+        inline for (names) |name| {
+            try w.writeAll("        .");
+            try writeSnake(w, name, .lower, .camel);
+            try w.writeAll(" => \"");
+            try writeMessageFromCamel(w, name);
+            try w.writeAll("\",\n");
+        }
     }
 
     for (def.error_suffix) |entry| {
@@ -125,10 +132,12 @@ fn renderMapLibraryError(w: *std.Io.Writer) !void {
         \\pub fn mapLibraryError(err: anyerror) ?zfh_error {
         \\
     );
-    inline for (std.meta.fields(zfh.Error)) |field| {
-        try w.print("    if (err == zfh.Error.{f}) return .", .{std.zig.fmtId(field.name)});
-        try writeSnake(w, field.name, .lower, .camel);
-        try w.writeAll(";\n");
+    if (error_names) |names| {
+        inline for (names) |name| {
+            try w.print("    if (err == zfh.Error.{f}) return .", .{std.zig.fmtId(name)});
+            try writeSnake(w, name, .lower, .camel);
+            try w.writeAll(";\n");
+        }
     }
     try w.writeAll(
         \\    return null;

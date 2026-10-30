@@ -7,7 +7,7 @@ const native_os = builtin.os.tag;
 const HashAlgorithm = algorithms.HashAlgorithm;
 const RuntimeHasher = algorithms.RuntimeHasher;
 
-const runtime_hasher_union_fields = algorithms.runtime_hasher_union_fields;
+const runtime_hasher_union = algorithms.runtime_hasher_union;
 
 const HashOptions = algorithms.HashOptions;
 const Error = algorithms.Error;
@@ -218,8 +218,8 @@ fn expectDeterministicStringHash(alg: HashAlgorithm) !void {
 }
 
 test "deterministic string hash" {
-    inline for (runtime_hasher_union_fields) |field| {
-        const alg = @field(HashAlgorithm, field.name);
+    inline for (runtime_hasher_union.field_names) |field_name| {
+        const alg = @field(HashAlgorithm, field_name);
         try expectDeterministicStringHash(alg);
     }
 }
@@ -268,8 +268,8 @@ fn expectFileHashDeterminismAndConsistency(alg: HashAlgorithm) !void {
 }
 
 test "file hash determinism and consistency with string hash" {
-    inline for (runtime_hasher_union_fields) |field| {
-        const alg = @field(HashAlgorithm, field.name);
+    inline for (runtime_hasher_union.field_names) |field_name| {
+        const alg = @field(HashAlgorithm, field_name);
         try expectFileHashDeterminismAndConsistency(alg);
     }
 }
@@ -277,8 +277,8 @@ test "file hash determinism and consistency with string hash" {
 test "different input produces different hash" {
     const data1 = "Hello, world!";
     const data2 = "Hello, world?";
-    inline for (runtime_hasher_union_fields) |field| {
-        const alg = @field(HashAlgorithm, field.name);
+    inline for (runtime_hasher_union.field_names) |field_name| {
+        const alg = @field(HashAlgorithm, field_name);
         const options_array = getDemoOptionsArray(alg);
         for (options_array) |options| {
             var out_buf1: [max_digest_length]u8 = undefined;
@@ -296,8 +296,8 @@ test "different input produces different hash" {
 
 test "different options produce different hash" {
     const data = "Hello, world!";
-    inline for (runtime_hasher_union_fields) |field| {
-        const alg = @field(HashAlgorithm, field.name);
+    inline for (runtime_hasher_union.field_names) |field_name| {
+        const alg = @field(HashAlgorithm, field_name);
         switch (alg) {
             HashAlgorithm.@"SHA-224", //
             HashAlgorithm.@"SHA-256",
@@ -367,8 +367,8 @@ test "different options produce different hash" {
 
 test "empty input produces deterministic hash" {
     const empty: []const u8 = "";
-    inline for (runtime_hasher_union_fields) |field| {
-        const alg = @field(HashAlgorithm, field.name);
+    inline for (runtime_hasher_union.field_names) |field_name| {
+        const alg = @field(HashAlgorithm, field_name);
         const options_array = getDemoOptionsArray(alg);
         for (options_array) |options| {
             var out_buf1: [max_digest_length]u8 = undefined;
@@ -403,8 +403,8 @@ test "multi-chunk file (>64KB) hash matches string hash" {
         defer file.close(io);
         try file.writeStreamingAll(io, data[0..]);
     }
-    inline for (runtime_hasher_union_fields) |field| {
-        const alg = @field(HashAlgorithm, field.name);
+    inline for (runtime_hasher_union.field_names) |field_name| {
+        const alg = @field(HashAlgorithm, field_name);
         const options_array = getDemoOptionsArray(alg);
         for (options_array) |options| {
             var out_buf_file: [max_digest_length]u8 = undefined;
@@ -435,8 +435,8 @@ test "Public API produces same hash as direct API" {
         try file.writeStreamingAll(io, data);
     }
 
-    inline for (runtime_hasher_union_fields) |field| {
-        const alg = @field(HashAlgorithm, field.name);
+    inline for (runtime_hasher_union.field_names) |field_name| {
+        const alg = @field(HashAlgorithm, field_name);
         const options_array = getDemoOptionsArray(alg);
         for (options_array) |options| {
             var out_buf_dir_file: [max_digest_length]u8 = undefined;
@@ -539,8 +539,8 @@ test "random stress test" {
         const len = random.intRangeAtMost(usize, 0, buf.len);
         random.bytes(buf[0..len]);
 
-        inline for (runtime_hasher_union_fields) |field| {
-            const alg = @field(HashAlgorithm, field.name);
+        inline for (runtime_hasher_union.field_names) |field_name| {
+            const alg = @field(HashAlgorithm, field_name);
             const options_array = getDemoOptionsArray(alg);
 
             for (options_array) |options| {

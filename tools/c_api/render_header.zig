@@ -24,6 +24,8 @@ pub fn render(w: *std.Io.Writer) !void {
     );
 }
 
+const error_names = @typeInfo(zfh.Error).error_set.error_names;
+
 fn renderCErrorEnum(w: *std.Io.Writer) !void {
     try w.writeAll("/* ABI note: enum numeric values are generated from ZFH_API_VERSION's C ABI contract. */\n");
     try w.writeAll("typedef enum zfh_error {\n");
@@ -32,26 +34,29 @@ fn renderCErrorEnum(w: *std.Io.Writer) !void {
         try w.print("    {s} = {d},\n", .{ entry.c_name, value });
     }
 
-    inline for (std.meta.fields(zfh.Error), 0..) |field, i| {
-        try w.writeAll("    ZFH_");
-        try writeSnake(w, field.name, .upper, .camel);
-        try w.print(" = {d},\n", .{def.error_prefix.len + i});
-    }
-
-    const suffix_offset = def.error_prefix.len + std.meta.fields(zfh.Error).len;
-    for (def.error_suffix, 0..) |entry, i| {
-        try w.print("    {s} = {d},\n", .{ entry.c_name, suffix_offset + i });
+    if (error_names) |names| {
+        inline for (names, 0..) |name, i| {
+            try w.writeAll("    ZFH_");
+            try writeSnake(w, name, .upper, .camel);
+            try w.print(" = {d},\n", .{def.error_prefix.len + i});
+        }
+        const suffix_offset = def.error_prefix.len + names.len;
+        for (def.error_suffix, 0..) |entry, i| {
+            try w.print("    {s} = {d},\n", .{ entry.c_name, suffix_offset + i });
+        }
     }
 
     try w.writeAll("} zfh_error;\n\n");
 }
 
+const alg_names = @typeInfo(zfh.HashAlgorithm).@"enum".field_names;
+
 fn renderCAlgorithmEnum(w: *std.Io.Writer) !void {
     try w.writeAll("/* ABI note: enum numeric values are generated from ZFH_API_VERSION's C ABI contract. */\n");
     try w.writeAll("typedef enum zfh_algorithm {\n");
-    inline for (std.meta.fields(zfh.HashAlgorithm), 0..) |field, value| {
+    inline for (alg_names, 0..) |name, value| {
         try w.writeAll("    ZFH_ALG_");
-        try writeSnake(w, field.name, .upper, .separators);
+        try writeSnake(w, name, .upper, .separators);
         try w.print(" = {d},\n", .{value});
     }
     try w.writeAll("} zfh_algorithm;\n\n");

@@ -2,13 +2,13 @@
 
 [![Patreon](https://img.shields.io/endpoint?url=https%3A%2F%2Fshieldsio-patreon.vercel.app%2Fapi%2F%3Fusername%3Dpreeternal%26type%3Dpatrons)](https://www.patreon.com/preeternal)
 
-Small hashing library in Zig with a runtime algorithm enum, explicit Zig 0.16
+Small hashing library in Zig with a runtime algorithm enum, explicit Zig 0.17
 I/O, cancellable hash requests, and an optional C ABI.
 
 ## Status
 
 - Pre-1.0 API may change.
-- Minimum Zig version: `0.16.0` (`build.zig.zon`).
+- Minimum Zig version: `0.17.0` (`build.zig.zon`).
 - Current C ABI version: `ZFH_API_VERSION = 4`.
 
 ## Features
