@@ -27,7 +27,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.0
+          version: 0.17.1
 
       - name: Run tests
         run: zig build test
@@ -46,7 +46,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.17.0
+          version: 0.17.1
 
       - name: Build iOS C ABI static
         run: zig build c-api-static -Dtarget=aarch64-ios -Doptimize=ReleaseFast

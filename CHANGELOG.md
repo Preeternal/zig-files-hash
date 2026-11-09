@@ -1,8 +1,8 @@
 # Releases
 
-## v0.0.8 — Zig 0.17
+## v0.0.8 — Zig 0.17.1
 
-- Minimum Zig version raised to `0.17.0`; updated reflection, CLI build setup,
+- Minimum Zig version raised to `0.17.1`; updated reflection, CLI build setup,
   and C API generation for the new compiler.
 - C ABI remains `ZFH_API_VERSION = 4`; existing C/FFI bindings need no changes.
 
